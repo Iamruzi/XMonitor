@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>X 用户监控台</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main id="loginView" class="login-view">
+      <section class="login-card">
+        <div>
+          <p class="eyebrow">X 用户监控台</p>
+          <h1>登录监控工作台</h1>
+          <p class="subtitle">管理监控用户、事件筛选、Telegram 和 WxPusher 通知</p>
+        </div>
+        <form id="loginForm" class="login-form">
+          <label>
+            <span>管理密码</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" placeholder="默认 Vip.123456" />
+          </label>
+          <button class="primary" type="submit">进入工作台</button>
+          <p id="loginStatus" class="status-line"></p>
+        </form>
+      </section>
+    </main>
+
+    <main id="appView" class="shell hidden">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">X 用户监控台</p>
+          <h1>监控工作台</h1>
+        </div>
+        <nav class="main-tabs" aria-label="页面">
+          <button class="active" type="button">监控与事件</button>
+        </nav>
+        <div class="top-actions">
+          <button id="openSettings" type="button">设置</button>
+          <button id="logout" type="button">退出</button>
+        </div>
+      </header>
+
+      <section class="status-grid" aria-label="监控总览">
+        <article>
+          <span>监控用户</span>
+          <strong id="metricTargets">0</strong>
+        </article>
+        <article>
+          <span>运行中</span>
+          <strong id="metricEnabled">0</strong>
+        </article>
+        <article>
+          <span>发现事件</span>
+          <strong id="metricEvents">0</strong>
+        </article>
+        <article>
+          <span>通知状态</span>
+          <strong id="metricTelegram">未配置</strong>
+        </article>
+        <article>
+          <span>后台检查</span>
+          <strong id="pollWindow">180-300 秒随机</strong>
+        </article>
+        <article>
+          <span>下一轮倒计时</span>
+          <strong id="nextPoll">计算中</strong>
+        </article>
+      </section>
+
+      <section class="actionbar">
+        <form id="addTargetForm" class="add-user-bar">
+          <label>
+            <span>X 用户名</span>
+            <input id="handleInput" type="text" placeholder="输入 X 用户名，例如 SkyAAmen" autocomplete="off" required />
+          </label>
+          <label>
+            <span>分组</span>
+            <input id="groupInput" type="text" list="groupOptions" placeholder="例如 alpha猎手" autocomplete="off" />
+          </label>
+          <label>
+            <span>备注名</span>
+            <input id="remarkInput" type="text" placeholder="例如 wx好友流星" autocomplete="off" />
+          </label>
+          <button id="resolveUser" type="button">识别用户</button>
+          <button class="primary" type="submit">添加</button>
+        </form>
+        <div id="resolvePreview" class="resolve-preview">还未识别用户</div>
+        <div class="actionbar-buttons">
+          <button id="pollAll" class="primary" type="button">立即检查全部</button>
+          <button id="refresh" type="button">刷新</button>
+        </div>
+      </section>
+
+      <section class="main-workspace">
+        <section class="panel user-panel">
+          <div class="panel-head">
+            <div>
+              <h2>监控用户</h2>
+              <p>像表格一样逐行管理用户、行为和状态</p>
+            </div>
+            <span id="targetCount" class="badge neutral">0 个</span>
+          </div>
+          <div class="table-wrap">
+            <table class="target-table">
+              <thead>
+                <tr>
+                  <th>用户</th>
+                  <th>分组</th>
+                  <th>备注名</th>
+                  <th>用户名</th>
+                  <th>状态</th>
+                  <th>原创</th>
+                  <th>转推</th>
+                  <th>回复</th>
+                  <th>关注</th>
+                  <th>推文数</th>
+                  <th>关注数</th>
+                  <th>上次检查</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="targetsTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel event-panel">
+          <div class="panel-head">
+            <div>
+              <h2>事件中心</h2>
+              <p>按分组、用户、类型和通知状态筛选</p>
+            </div>
+            <span id="eventCount" class="badge">0 条</span>
+          </div>
+          <div class="event-filters">
+            <label>
+              <span>分组</span>
+              <select id="eventGroupFilter"></select>
+            </label>
+            <label>
+              <span>监控用户</span>
+              <select id="eventTargetFilter"></select>
+            </label>
+            <label>
+              <span>事件类型</span>
+              <select id="eventTypeFilter"></select>
+            </label>
+            <label>
+              <span>通知状态</span>
+              <select id="eventNotifyFilter">
+                <option value="all">全部</option>
+                <option value="notified">已通知</option>
+                <option value="pending">未通知</option>
+                <option value="error">异常</option>
+              </select>
+            </label>
+            <label>
+              <span>关键词</span>
+              <input id="eventSearch" type="search" placeholder="搜索标题或内容" />
+            </label>
+          </div>
+          <div class="event-list-wrap">
+            <div id="eventsList" class="events-list"></div>
+          </div>
+          <div class="pager">
+            <button id="eventPrev" type="button">上一页</button>
+            <span id="eventPageInfo">第 1 页</span>
+            <button id="eventNext" type="button">下一页</button>
+          </div>
+        </section>
+      </section>
+
+      <p id="statusLine" class="status-line"></p>
+    </main>
+
+    <aside id="settingsDrawer" class="settings-drawer hidden" aria-label="设置">
+      <div class="drawer-backdrop" id="closeSettingsBackdrop"></div>
+      <section class="drawer-panel">
+        <header class="drawer-head">
+          <div>
+            <h2>系统设置</h2>
+            <p>通知接收人、代理和安全</p>
+          </div>
+          <button id="closeSettings" type="button">关闭</button>
+        </header>
+
+        <form id="notificationForm" class="drawer-body">
+          <section class="setting-section">
+            <h3>分组管理</h3>
+            <div class="group-add">
+              <label>
+                <span>新增分组</span>
+                <input id="newGroupInput" type="text" list="groupOptions" placeholder="例如 alpha猎手" autocomplete="off" />
+              </label>
+              <button id="addGroup" class="primary" type="button">添加分组</button>
+            </div>
+            <div class="editable-list-head">
+              <strong>已有分组</strong>
+              <span>可批量改名或清空分组归属</span>
+            </div>
+            <div id="groupManager" class="group-list"></div>
+            <p class="hint">清空分组只会把相关用户移到未分组，不会删除监控用户和历史事件。</p>
+          </section>
+
+          <section class="setting-section">
+            <h3>后台检查</h3>
+            <div class="field-grid three">
+              <label>
+                <span>最短间隔（秒）</span>
+                <input id="pollMinSeconds" type="number" min="30" step="1" />
+              </label>
+              <label>
+                <span>最长间隔（秒）</span>
+                <input id="pollMaxSeconds" type="number" min="30" step="1" />
+              </label>
+              <label>
+                <span>失败退避上限（秒）</span>
+                <input id="pollBackoffSeconds" type="number" min="30" step="1" />
+              </label>
+            </div>
+            <button id="savePollSettings" class="primary" type="button">保存检查间隔</button>
+            <p class="hint">保存后会影响下一轮后台检查；当前正在等待的一轮不会被强制打断。</p>
+          </section>
+
+          <section class="setting-section">
+            <h3>批量导入 / 导出</h3>
+            <textarea id="bulkImportText" rows="7" placeholder="每行一个用户：&#10;@0xliuxing,alpha猎手,wx好友流星&#10;SkyAAmen,项目方,重点观察"></textarea>
+            <label class="inline-check">
+              <input id="importUpdateExisting" type="checkbox" checked />
+              <span>已存在用户时更新分组、备注和监控行为</span>
+            </label>
+            <div class="drawer-actions">
+              <button id="importTargets" class="primary" type="button">导入用户</button>
+              <button id="exportTargets" type="button">导出 CSV</button>
+            </div>
+            <p id="bulkImportResult" class="hint"></p>
+          </section>
+
+          <section class="setting-section">
+            <h3>Telegram</h3>
+            <div class="field-grid">
+              <label>
+                <span>机器人 Token</span>
+                <input id="telegramToken" type="password" autocomplete="off" />
+              </label>
+              <label>
+                <span>通知代理</span>
+                <input id="telegramProxy" type="text" placeholder="http://127.0.0.1:7897" autocomplete="off" />
+              </label>
+            </div>
+            <div class="editable-list-head">
+              <strong>接收聊天</strong>
+              <span>主聊天和已授权群都会接收通知</span>
+            </div>
+            <div id="telegramRecipients" class="editable-list"></div>
+            <button id="addTelegramRecipient" type="button">增加 Telegram 接收聊天</button>
+          </section>
+
+          <section class="setting-section">
+            <h3>WxPusher</h3>
+            <label>
+              <span>应用 Token</span>
+              <input id="wxpusherToken" type="password" autocomplete="off" />
+            </label>
+            <div class="editable-list-head">
+              <strong>接收人 UID</strong>
+              <span>可新增、编辑、删除多个 UID</span>
+            </div>
+            <div id="wxpusherRecipients" class="editable-list"></div>
+            <button id="addWxpusherRecipient" type="button">增加 WxPusher UID</button>
+          </section>
+
+          <section class="setting-section">
+            <h3>管理安全</h3>
+            <p class="hint">管理密码用于保护所有增删改查 API。默认密码是 Vip.123456，部署到公网后建议用环境变量 MONITOR_ADMIN_TOKEN 修改。</p>
+          </section>
+
+          <div class="drawer-actions">
+            <button class="primary" type="submit">保存设置</button>
+            <button id="testTelegram" type="button">发送测试通知</button>
+          </div>
+        </form>
+      </section>
+    </aside>
+
+    <datalist id="groupOptions"></datalist>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

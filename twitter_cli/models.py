@@ -47,6 +47,8 @@ class Tweet:
     urls: List[str] = field(default_factory=list)
     is_retweet: bool = False
     lang: str = ""
+    in_reply_to_status_id: Optional[str] = None
+    in_reply_to_screen_name: Optional[str] = None
     retweeted_by: Optional[str] = None
     quoted_tweet: Optional[Tweet] = None
     score: Optional[float] = None
