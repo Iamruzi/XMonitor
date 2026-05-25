@@ -747,6 +747,11 @@ a {
   padding-top: 4px;
 }
 
+.test-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-top: 0;
+}
+
 @media (max-width: 1700px) {
   .main-workspace {
     grid-template-columns: 1fr;
@@ -793,10 +798,11 @@ a {
   .field-grid,
   .field-grid.three,
   .group-add,
-  .group-row,
-  .editable-row,
-  .editable-row.two,
-  .drawer-actions {
+    .group-row,
+    .editable-row,
+    .editable-row.two,
+    .test-actions,
+    .drawer-actions {
     grid-template-columns: 1fr;
   }
 

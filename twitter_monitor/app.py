@@ -98,6 +98,10 @@ class NotificationSettingsUpdate(BaseModel):
     bark_volume: int | None = None
 
 
+class NotificationTestRequest(BaseModel):
+    channel: str = "all"
+
+
 class UserResolve(BaseModel):
     query: str
 
@@ -515,9 +519,13 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
         wxpusher_remove_uid=payload.wxpusher_remove_uid,
         clear_wxpusher_app_token=payload.clear_wxpusher_app_token,
     )
+    submitted_bark_keys = payload.bark_device_keys
+    existing_bark = _notification_config()
+    if submitted_bark_keys == [] and existing_bark.get("barkDeviceKeyCount", 0):
+        submitted_bark_keys = None
     storage.update_bark_settings(
         bark_server_url=payload.bark_server_url,
-        bark_device_keys=payload.bark_device_keys,
+        bark_device_keys=submitted_bark_keys,
         bark_add_device_key=payload.bark_add_device_key,
         bark_remove_device_key=payload.bark_remove_device_key,
         bark_level=payload.bark_level,
@@ -530,17 +538,22 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
 
 
 @app.post("/api/notification-settings/test", dependencies=[Depends(require_admin)])
-async def test_notification() -> dict[str, Any]:
+async def test_notification(payload: NotificationTestRequest | None = None) -> dict[str, Any]:
+    channel = (payload.channel if payload else "all").strip().lower()
     config_data = _notification_config()
     if not config_data["notificationConfigured"]:
         raise HTTPException(status_code=400, detail="请先配置 Telegram、WxPusher 或 Bark 通知")
+    try:
+        adapter = poller._notification_adapter(channel)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = await asyncio.to_thread(
-        poller._notification_adapter().send_event,
+        adapter.send_event,
         {
             "event_type": "test",
             "target_handle": "monitor",
             "title": "测试通知",
-            "body": "如果你看到这条消息，说明监控平台通知已经配置成功。",
+            "body": "如果你看到这条消息，说明监控平台通知已经配置成功。渠道：%s" % channel,
             "url": "",
         },
     )

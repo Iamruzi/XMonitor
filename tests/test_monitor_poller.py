@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+import pytest
+
 from twitter_cli.models import Author, Metrics, Tweet, UserProfile
 from twitter_monitor.notifiers import BarkNotifier, EventFormatter, TelegramNotifier, WxPusherNotifier
 from twitter_monitor.notifiers import NotificationResult
@@ -177,6 +179,20 @@ def test_poller_applies_saved_network_proxy(monkeypatch, tmp_path) -> None:
     poller._make_client()
 
     assert applied == ["http://proxy.local:7890"]
+
+
+def test_notification_adapter_can_select_bark_channel(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    storage.update_bark_settings(bark_device_keys=["device-key"])
+    poller = MonitorPoller(storage, _settings(storage.db_path), FakeNotifier())
+
+    adapter = poller._notification_adapter("bark")
+
+    assert len(adapter.adapters) == 1
+    assert isinstance(adapter.adapters[0], BarkNotifier)
+    with pytest.raises(ValueError):
+        poller._notification_adapter("unknown")
 
 
 def test_following_notification_uses_target_handle_and_time(monkeypatch) -> None:

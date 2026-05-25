@@ -222,7 +222,8 @@ class MonitorPoller:
         )
         return {"sent": outcome.sent, "error": outcome.error}
 
-    def _notification_adapter(self) -> CompositeNotifier:
+    def _notification_adapter(self, channel: str = "all") -> CompositeNotifier:
+        channel = self._normalize_channel(channel)
         db_settings = self.storage.get_notification_settings()
         db_token = db_settings.get("telegram_bot_token") or ""
         db_chat_id = db_settings.get("telegram_chat_id") or ""
@@ -257,7 +258,29 @@ class MonitorPoller:
             volume=self._setting_int(bark_settings.get("bark_volume"), self.settings.bark_volume),
             proxy=db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
         )
-        return CompositeNotifier([telegram, wxpusher, bark])
+        adapters: list[Any] = []
+        if channel in {"all", "telegram"}:
+            adapters.append(telegram)
+        if channel in {"all", "wxpusher"}:
+            adapters.append(wxpusher)
+        if channel in {"all", "bark"}:
+            adapters.append(bark)
+        return CompositeNotifier(adapters)
+
+    def _normalize_channel(self, channel: str) -> str:
+        normalized = str(channel or "all").strip().lower()
+        aliases = {
+            "all": "all",
+            "全部": "all",
+            "telegram": "telegram",
+            "tg": "telegram",
+            "wxpusher": "wxpusher",
+            "wx": "wxpusher",
+            "bark": "bark",
+        }
+        if normalized not in aliases:
+            raise ValueError("未知通知渠道：%s" % channel)
+        return aliases[normalized]
 
     def _split_uids(self, raw: str) -> list[str]:
         return [uid.strip() for uid in raw.replace(";", ",").split(",") if uid.strip()]

@@ -546,9 +546,12 @@ function collectWxpusherUids() {
 }
 
 function collectBarkDeviceKeys() {
-  return [...$("barkDeviceKeys").querySelectorAll('[data-field="device_key"]')]
+  const keys = [...$("barkDeviceKeys").querySelectorAll('[data-field="device_key"]')]
     .map((input) => input.value.trim())
     .filter(Boolean);
+  const savedCount = Number(state.config?.notification?.barkDeviceKeyCount || 0);
+  if (!keys.length && savedCount > 0) return null;
+  return keys;
 }
 
 function parseCsvLine(line) {
@@ -833,15 +836,23 @@ $("notificationForm").addEventListener("submit", async (event) => {
   }
 });
 
-$("testTelegram").addEventListener("click", async () => {
+async function testNotification(channel, label) {
   try {
-    setStatus("正在发送测试通知...");
-    await api("/api/notification-settings/test", { method: "POST" });
-    setStatus("测试通知已发送");
+    setStatus(`正在发送${label}测试通知...`);
+    await api("/api/notification-settings/test", {
+      method: "POST",
+      body: JSON.stringify({ channel }),
+    });
+    setStatus(`${label}测试通知已发送`);
   } catch (error) {
     setStatus(error.message, true);
   }
-});
+}
+
+$("testAll").addEventListener("click", () => testNotification("all", "全部渠道"));
+$("testTelegram").addEventListener("click", () => testNotification("telegram", "Telegram"));
+$("testWxpusher").addEventListener("click", () => testNotification("wxpusher", "WxPusher"));
+$("testBark").addEventListener("click", () => testNotification("bark", "Bark"));
 
 ["eventGroupFilter", "eventTargetFilter", "eventTypeFilter", "eventNotifyFilter", "eventSearch"].forEach((id) => {
   $(id).addEventListener("input", () => {
