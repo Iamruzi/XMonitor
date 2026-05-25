@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any
 
-from twitter_cli.client import TwitterClient
+from twitter_cli.client import TwitterClient, set_runtime_proxy
 from twitter_cli.config import load_config
 from twitter_cli.serialization import tweet_to_dict, user_profile_to_dict
 
@@ -91,8 +91,13 @@ class MonitorPoller:
         ct0 = os.environ.get("TWITTER_CT0", "")
         if not auth_token or not ct0:
             raise RuntimeError("TWITTER_AUTH_TOKEN and TWITTER_CT0 are required")
+        set_runtime_proxy(self._network_proxy())
         config = load_config()
         return TwitterClient(auth_token, ct0, config.get("rateLimit"))
+
+    def _network_proxy(self) -> str:
+        db_settings = self.storage.get_notification_settings()
+        return (db_settings.get("telegram_proxy") or self.settings.telegram_proxy or "").strip()
 
     def _poll_tweets(self, client: TwitterClient, target: dict[str, Any], user_id: str) -> dict[str, Any]:
         target_id = int(target["id"])

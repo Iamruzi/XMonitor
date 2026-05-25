@@ -160,6 +160,25 @@ def test_poller_classifies_replies_and_retweets(tmp_path) -> None:
     assert event_types == {"reply", "retweet"}
 
 
+def test_poller_applies_saved_network_proxy(monkeypatch, tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    storage.update_notification_settings(telegram_proxy="http://proxy.local:7890")
+    monkeypatch.setenv("TWITTER_AUTH_TOKEN", "auth")
+    monkeypatch.setenv("TWITTER_CT0", "ct0")
+    applied = []
+
+    monkeypatch.setattr("twitter_monitor.poller.set_runtime_proxy", lambda proxy: applied.append(proxy))
+    monkeypatch.setattr("twitter_monitor.poller.load_config", lambda: {"rateLimit": {}})
+    monkeypatch.setattr("twitter_monitor.poller.TwitterClient", lambda *args, **kwargs: object())
+
+    poller = MonitorPoller(storage, _settings(storage.db_path), FakeNotifier())
+
+    poller._make_client()
+
+    assert applied == ["http://proxy.local:7890"]
+
+
 def test_following_notification_uses_target_handle_and_time(monkeypatch) -> None:
     monkeypatch.setenv("MONITOR_TIMEZONE", "Asia/Shanghai")
     monkeypatch.setattr(

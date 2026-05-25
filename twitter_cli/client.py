@@ -65,6 +65,8 @@ logger = logging.getLogger(__name__)
 
 # Shared curl_cffi session (single-threaded CLI)
 _cffi_session = None
+_cffi_session_proxy = None  # type: Optional[str]
+_runtime_proxy = None  # type: Optional[str]
 
 TimelineInstructionGetter = Callable[[Any], Any]
 
@@ -103,18 +105,39 @@ def _best_chrome_target():
     return chrome_targets[0] if chrome_targets else "chrome131"
 
 
+def set_runtime_proxy(proxy):
+    # type: (Optional[str]) -> None
+    """Set or clear the in-process proxy used by the shared API session."""
+    global _runtime_proxy
+    cleaned = (proxy or "").strip()
+    _runtime_proxy = cleaned or None
+
+
+def _current_proxy():
+    # type: () -> str
+    if _runtime_proxy:
+        return _runtime_proxy
+    return os.environ.get("TWITTER_PROXY", "")
+
+
 def _get_cffi_session():
     # type: () -> Any
     """Return shared curl_cffi session with Chrome impersonation and optional proxy."""
-    global _cffi_session
-    if _cffi_session is None:
-        proxy = os.environ.get("TWITTER_PROXY", "")
+    global _cffi_session, _cffi_session_proxy
+    proxy = _current_proxy()
+    if _cffi_session is None or _cffi_session_proxy != proxy:
+        if _cffi_session is not None:
+            try:
+                _cffi_session.close()
+            except Exception:
+                pass
         target = _best_chrome_target()
         sync_chrome_version(target)  # align UA/sec-ch-ua with impersonate target
         _cffi_session = _cffi_requests.Session(
             impersonate=cast(Any, target),
             proxies={"https": proxy, "http": proxy} if proxy else None,
         )
+        _cffi_session_proxy = proxy
         logger.info("curl_cffi impersonating %s", target)
         if proxy:
             logger.info("Using proxy: %s", proxy[:20] + "...")
