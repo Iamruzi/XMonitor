@@ -241,29 +241,37 @@ class MonitorPoller:
         wx_settings = self.storage.get_wxpusher_settings()
         wx_app_token = wx_settings.get("wxpusher_app_token") or self.settings.wxpusher_app_token
         wx_uids = wx_settings.get("wxpusher_uids") or self._split_uids(self.settings.wxpusher_uids)
-        wxpusher = WxPusherNotifier(
-            str(wx_app_token or ""),
-            [str(uid) for uid in wx_uids],
-            db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
+        wxpusher = (
+            WxPusherNotifier(
+                str(wx_app_token or ""),
+                [str(uid) for uid in wx_uids],
+                db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
+            )
+            if self._setting_bool(wx_settings.get("wxpusher_enabled"), True)
+            else None
         )
         bark_settings = self.storage.get_bark_settings()
         bark_keys = bark_settings.get("bark_device_keys") or self._split_uids(self.settings.bark_device_keys)
-        bark = BarkNotifier(
-            str(bark_settings.get("bark_server_url") or self.settings.bark_server_url),
-            [str(key) for key in bark_keys],
-            level=str(bark_settings.get("bark_level") or self.settings.bark_level),
-            sound=str(bark_settings.get("bark_sound") or self.settings.bark_sound),
-            group=str(bark_settings.get("bark_group") or self.settings.bark_group),
-            call=self._setting_bool(bark_settings.get("bark_call"), self.settings.bark_call),
-            volume=self._setting_int(bark_settings.get("bark_volume"), self.settings.bark_volume),
-            proxy=db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
+        bark = (
+            BarkNotifier(
+                str(bark_settings.get("bark_server_url") or self.settings.bark_server_url),
+                [str(key) for key in bark_keys],
+                level=str(bark_settings.get("bark_level") or self.settings.bark_level),
+                sound=str(bark_settings.get("bark_sound") or self.settings.bark_sound),
+                group=str(bark_settings.get("bark_group") or self.settings.bark_group),
+                call=self._setting_bool(bark_settings.get("bark_call"), self.settings.bark_call),
+                volume=self._setting_int(bark_settings.get("bark_volume"), self.settings.bark_volume),
+                proxy=db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
+            )
+            if self._setting_bool(bark_settings.get("bark_enabled"), True)
+            else None
         )
         adapters: list[Any] = []
         if channel in {"all", "telegram"}:
             adapters.append(telegram)
-        if channel in {"all", "wxpusher"}:
+        if channel in {"all", "wxpusher"} and wxpusher is not None:
             adapters.append(wxpusher)
-        if channel in {"all", "bark"}:
+        if channel in {"all", "bark"} and bark is not None:
             adapters.append(bark)
         return CompositeNotifier(adapters)
 

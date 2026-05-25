@@ -674,6 +674,7 @@ class MonitorStorage:
         return {
             "wxpusher_app_token": self.get_app_setting("wxpusher_app_token"),
             "wxpusher_uids": self._json_list_setting("wxpusher_uids"),
+            "wxpusher_enabled": self.get_app_setting("wxpusher_enabled", "1"),
         }
 
     def update_wxpusher_settings(
@@ -683,12 +684,15 @@ class MonitorStorage:
         wxpusher_uids: list[str] | None = None,
         wxpusher_add_uid: str | None = None,
         wxpusher_remove_uid: str | None = None,
+        wxpusher_enabled: bool | None = None,
         clear_wxpusher_app_token: bool = False,
     ) -> dict[str, Any]:
         if clear_wxpusher_app_token:
             self.set_app_setting("wxpusher_app_token", "")
         elif wxpusher_app_token is not None and wxpusher_app_token.strip():
             self.set_app_setting("wxpusher_app_token", wxpusher_app_token.strip())
+        if wxpusher_enabled is not None:
+            self.set_app_setting("wxpusher_enabled", "1" if wxpusher_enabled else "0")
 
         uids = self._json_list_setting("wxpusher_uids")
         if wxpusher_uids is not None:
@@ -712,6 +716,7 @@ class MonitorStorage:
             "bark_group": self.get_app_setting("bark_group"),
             "bark_call": self.get_app_setting("bark_call"),
             "bark_volume": self.get_app_setting("bark_volume"),
+            "bark_enabled": self.get_app_setting("bark_enabled", "1"),
         }
 
     def update_bark_settings(
@@ -726,6 +731,7 @@ class MonitorStorage:
         bark_group: str | None = None,
         bark_call: bool | None = None,
         bark_volume: int | None = None,
+        bark_enabled: bool | None = None,
     ) -> dict[str, Any]:
         if bark_server_url is not None:
             self.set_app_setting("bark_server_url", self._clean_url(bark_server_url))
@@ -739,6 +745,8 @@ class MonitorStorage:
             self.set_app_setting("bark_call", "1" if bark_call else "0")
         if bark_volume is not None:
             self.set_app_setting("bark_volume", str(min(max(int(bark_volume), 0), 10)))
+        if bark_enabled is not None:
+            self.set_app_setting("bark_enabled", "1" if bark_enabled else "0")
 
         device_keys = self._json_list_setting("bark_device_keys")
         if bark_device_keys is not None:

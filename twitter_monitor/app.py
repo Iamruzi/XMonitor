@@ -96,6 +96,7 @@ class NotificationSettingsUpdate(BaseModel):
     wxpusher_uids: list[str] | None = None
     wxpusher_add_uid: str | None = None
     wxpusher_remove_uid: str | None = None
+    wxpusher_enabled: bool | None = None
     clear_wxpusher_app_token: bool = False
     bark_server_url: str | None = None
     bark_device_keys: list[str] | None = None
@@ -106,6 +107,7 @@ class NotificationSettingsUpdate(BaseModel):
     bark_group: str | None = None
     bark_call: bool | None = None
     bark_volume: int | None = None
+    bark_enabled: bool | None = None
 
 
 class NotificationTestRequest(BaseModel):
@@ -180,6 +182,7 @@ def _notification_config() -> dict[str, Any]:
     wx_settings = storage.get_wxpusher_settings()
     wx_token = wx_settings.get("wxpusher_app_token") or settings.wxpusher_app_token
     wx_uids = wx_settings.get("wxpusher_uids") or _split_list(settings.wxpusher_uids)
+    wx_enabled = _setting_bool(wx_settings.get("wxpusher_enabled"), True)
     bark_settings = storage.get_bark_settings()
     bark_server_url = bark_settings.get("bark_server_url") or settings.bark_server_url
     bark_device_keys = bark_settings.get("bark_device_keys") or _split_list(settings.bark_device_keys)
@@ -188,11 +191,14 @@ def _notification_config() -> dict[str, Any]:
     bark_group = bark_settings.get("bark_group") or settings.bark_group
     bark_call = _setting_bool(bark_settings.get("bark_call"), settings.bark_call)
     bark_volume = min(max(_setting_int(bark_settings.get("bark_volume"), settings.bark_volume), 0), 10)
+    bark_enabled = _setting_bool(bark_settings.get("bark_enabled"), True)
+    telegram_active = bool(token and telegram_chat_ids)
+    wx_active = bool(wx_enabled and wx_token and wx_uids)
+    bark_active = bool(bark_enabled and bark_server_url and bark_device_keys)
     return {
-        "notificationConfigured": bool(
-            (token and telegram_chat_ids) or (wx_token and wx_uids) or (bark_server_url and bark_device_keys)
-        ),
+        "notificationConfigured": bool(telegram_active or wx_active or bark_active),
         "telegramConfigured": bool(token and telegram_chat_ids),
+        "telegramActive": telegram_active,
         "telegramBotTokenSaved": bool(token),
         "telegramBotTokenPreview": _mask_secret(token),
         "telegramChatId": chat_id,
@@ -203,10 +209,14 @@ def _notification_config() -> dict[str, Any]:
         "telegramProxyConfigured": bool(proxy),
         "telegramCommandsEnabled": settings.telegram_commands_enabled,
         "wxpusherConfigured": bool(wx_token and wx_uids),
+        "wxpusherEnabled": wx_enabled,
+        "wxpusherActive": wx_active,
         "wxpusherAppTokenSaved": bool(wx_token),
         "wxpusherAppTokenPreview": _mask_secret(str(wx_token or "")),
         "wxpusherUids": wx_uids,
         "barkConfigured": bool(bark_server_url and bark_device_keys),
+        "barkEnabled": bark_enabled,
+        "barkActive": bark_active,
         "barkServerUrl": bark_server_url,
         "barkDeviceKeys": bark_device_keys,
         "barkDeviceKeyCount": len(bark_device_keys),
@@ -527,6 +537,7 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
         wxpusher_uids=payload.wxpusher_uids,
         wxpusher_add_uid=payload.wxpusher_add_uid,
         wxpusher_remove_uid=payload.wxpusher_remove_uid,
+        wxpusher_enabled=payload.wxpusher_enabled,
         clear_wxpusher_app_token=payload.clear_wxpusher_app_token,
     )
     submitted_bark_keys = payload.bark_device_keys
@@ -543,6 +554,7 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
         bark_group=payload.bark_group,
         bark_call=payload.bark_call,
         bark_volume=payload.bark_volume,
+        bark_enabled=payload.bark_enabled,
     )
     return {"data": _notification_config()}
 
@@ -551,7 +563,7 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
 async def test_notification(payload: NotificationTestRequest | None = None) -> dict[str, Any]:
     channel = (payload.channel if payload else "all").strip().lower()
     config_data = _notification_config()
-    if not config_data["notificationConfigured"]:
+    if not (config_data["telegramConfigured"] or config_data["wxpusherConfigured"] or config_data["barkConfigured"]):
         raise HTTPException(status_code=400, detail="请先配置 Telegram、WxPusher 或 Bark 通知")
     try:
         adapter = poller._notification_adapter(channel)
@@ -568,6 +580,8 @@ async def test_notification(payload: NotificationTestRequest | None = None) -> d
         },
     )
     if not result.sent:
+        if result.error == "notification_not_configured":
+            raise HTTPException(status_code=400, detail="通知渠道未配置或已暂停")
         raise HTTPException(status_code=400, detail=result.error or "测试通知发送失败")
     return {"ok": True}
 

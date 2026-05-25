@@ -83,12 +83,16 @@ def test_telegram_bot_manages_wxpusher_settings(tmp_path) -> None:
     assert "当前 1 个" in bot.handle_command("/wxpusher add UID_a")
     assert "当前 2 个" in bot.handle_command("/wxpusher add UID_b")
     assert "当前 1 个" in bot.handle_command("/wxpusher del UID_a")
+    assert bot.handle_command("/wxpusher off") == "已暂停 WxPusher 通知。"
+    assert bot.handle_command("/wxpusher on") == "已开启 WxPusher 通知。"
 
     settings = storage.get_wxpusher_settings()
     status = bot.handle_command("/wxpusher status")
 
     assert settings["wxpusher_app_token"] == "app-token"
     assert settings["wxpusher_uids"] == ["UID_b"]
+    assert settings["wxpusher_enabled"] == "1"
+    assert "通知状态：开启" in status
     assert "app-...oken" in status
     assert "UID_b" in status
 
@@ -105,6 +109,8 @@ def test_telegram_bot_manages_bark_settings(tmp_path) -> None:
     assert "已开启" in bot.handle_command("/bark call 开")
     assert "minuet" in bot.handle_command("/bark sound minuet")
     assert "8" in bot.handle_command("/bark volume 8")
+    assert bot.handle_command("/bark off") == "已暂停 Bark 通知。"
+    assert bot.handle_command("/bark on") == "已开启 Bark 通知。"
     assert "当前 1 个" in bot.handle_command("/bark del device-key-a")
 
     settings = storage.get_bark_settings()
@@ -116,6 +122,8 @@ def test_telegram_bot_manages_bark_settings(tmp_path) -> None:
     assert settings["bark_call"] == "1"
     assert settings["bark_sound"] == "minuet"
     assert settings["bark_volume"] == "8"
+    assert settings["bark_enabled"] == "1"
+    assert "通知状态：开启" in status
     assert "devi...ey-b" in status
     assert "紧急" in status
 
@@ -200,3 +208,15 @@ def test_telegram_bot_guided_menu_callbacks(tmp_path) -> None:
     assert "inline_keyboard" in markup
     assert any(button["callback_data"] == "menu:groups" for row in markup["inline_keyboard"] for button in row)
     assert any(button["callback_data"] == "menu:bark" for row in markup["inline_keyboard"] for button in row)
+
+    text, markup = bot._callback_reply("menu:bark", "-1001", "测试群")
+    assert "Bark 配置" in text
+    assert any(button["callback_data"] == "bark:level:critical" for row in markup["inline_keyboard"] for button in row)
+
+    text, _markup = bot._callback_reply("bark:level:critical", "-1001", "测试群")
+    assert "已设置 Bark 通知级别：紧急" in text
+    assert storage.get_bark_settings()["bark_level"] == "critical"
+
+    text, _markup = bot._callback_reply("wxpusher:enabled:0", "-1001", "测试群")
+    assert "已暂停 WxPusher 通知" in text
+    assert storage.get_wxpusher_settings()["wxpusher_enabled"] == "0"

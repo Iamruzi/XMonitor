@@ -195,6 +195,21 @@ def test_notification_adapter_can_select_bark_channel(tmp_path) -> None:
         poller._notification_adapter("unknown")
 
 
+def test_notification_adapter_skips_disabled_channels(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    storage.update_wxpusher_settings(
+        wxpusher_app_token="app-token",
+        wxpusher_uids=["UID_a"],
+        wxpusher_enabled=False,
+    )
+    storage.update_bark_settings(bark_device_keys=["device-key"], bark_enabled=False)
+    poller = MonitorPoller(storage, _settings(storage.db_path), FakeNotifier())
+
+    assert poller._notification_adapter("wxpusher").adapters == []
+    assert poller._notification_adapter("bark").adapters == []
+
+
 def test_following_notification_uses_target_handle_and_time(monkeypatch) -> None:
     monkeypatch.setenv("MONITOR_TIMEZONE", "Asia/Shanghai")
     monkeypatch.setattr(

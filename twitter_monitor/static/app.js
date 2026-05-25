@@ -174,8 +174,8 @@ async function loadConfig() {
   const notification = state.config.notification || {};
   const channels = [];
   if (notification.telegramConfigured) channels.push("Telegram");
-  if (notification.wxpusherConfigured) channels.push("WxPusher");
-  if (notification.barkConfigured) channels.push("Bark");
+  if (notification.wxpusherConfigured) channels.push(notification.wxpusherEnabled ? "WxPusher" : "WxPusher(暂停)");
+  if (notification.barkConfigured) channels.push(notification.barkEnabled ? "Bark" : "Bark(暂停)");
   $("metricTelegram").textContent = channels.length ? channels.join(" + ") : "未配置";
 
   const minPoll = state.config.pollIntervalMinSeconds || state.config.pollIntervalSeconds || 300;
@@ -496,6 +496,8 @@ function renderSettings(notification) {
   $("wxpusherToken").placeholder = notification.wxpusherAppTokenSaved
     ? `已保存：${notification.wxpusherAppTokenPreview}`
     : "";
+  $("wxpusherEnabled").checked = notification.wxpusherEnabled !== false;
+  $("barkEnabled").checked = notification.barkEnabled !== false;
   $("barkServerUrl").value = notification.barkServerUrl || "https://api.day.app";
   $("barkGroup").value = notification.barkGroup || "XMonitor";
   $("barkLevel").value = notification.barkLevel || "active";
@@ -816,8 +818,10 @@ $("notificationForm").addEventListener("submit", async (event) => {
         telegram_chat_id: telegram.primaryChatId,
         telegram_authorized_chats: telegram.authorized,
         telegram_proxy: $("telegramProxy").value.trim(),
+        wxpusher_enabled: $("wxpusherEnabled").checked,
         wxpusher_app_token: $("wxpusherToken").value.trim() || null,
         wxpusher_uids: collectWxpusherUids(),
+        bark_enabled: $("barkEnabled").checked,
         bark_server_url: $("barkServerUrl").value.trim(),
         bark_device_keys: collectBarkDeviceKeys(),
         bark_level: $("barkLevel").value,

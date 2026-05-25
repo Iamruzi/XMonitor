@@ -259,6 +259,13 @@
 
           <section class="setting-section">
             <h3>WxPusher</h3>
+            <label class="setting-toggle">
+              <input id="wxpusherEnabled" type="checkbox" />
+              <span>
+                <strong>启用 WxPusher 通知</strong>
+                <small>关闭后保留 Token 和 UID，但轮询事件不会推送到 WxPusher。</small>
+              </span>
+            </label>
             <label>
               <span>应用 Token</span>
               <input id="wxpusherToken" type="password" autocomplete="off" />
@@ -273,6 +280,13 @@
 
           <section class="setting-section">
             <h3>Bark</h3>
+            <label class="setting-toggle">
+              <input id="barkEnabled" type="checkbox" />
+              <span>
+                <strong>启用 Bark 通知</strong>
+                <small>关闭后保留设备码和提醒设置，但轮询事件不会推送到 Bark。</small>
+              </span>
+            </label>
             <div class="field-grid">
               <label>
                 <span>服务地址</span>
@@ -347,6 +361,6 @@
       <option value="silence"></option>
       <option value="telegraph"></option>
     </datalist>
-    <script src="/static/app.js?v=20260525-3"></script>
+    <script src="/static/app.js?v=20260526-1"></script>
   </body>
 </html>

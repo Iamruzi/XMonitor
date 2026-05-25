@@ -114,10 +114,12 @@ def test_storage_wxpusher_settings_manage_uids(tmp_path) -> None:
     settings = storage.update_wxpusher_settings(
         wxpusher_app_token="app-token",
         wxpusher_uids=["UID_a", "UID_a", " UID_b "],
+        wxpusher_enabled=False,
     )
 
     assert settings["wxpusher_app_token"] == "app-token"
     assert settings["wxpusher_uids"] == ["UID_a", "UID_b"]
+    assert settings["wxpusher_enabled"] == "0"
 
     settings = storage.update_wxpusher_settings(wxpusher_add_uid="UID_c")
     assert settings["wxpusher_uids"] == ["UID_a", "UID_b", "UID_c"]
@@ -141,6 +143,7 @@ def test_storage_bark_settings_manage_devices_and_alert_options(tmp_path) -> Non
         bark_group="XMonitor",
         bark_call=True,
         bark_volume=15,
+        bark_enabled=False,
     )
 
     assert settings["bark_server_url"] == "https://api.day.app"
@@ -150,6 +153,7 @@ def test_storage_bark_settings_manage_devices_and_alert_options(tmp_path) -> Non
     assert settings["bark_group"] == "XMonitor"
     assert settings["bark_call"] == "1"
     assert settings["bark_volume"] == "10"
+    assert settings["bark_enabled"] == "0"
 
     settings = storage.update_bark_settings(bark_add_device_key="key_c")
     assert settings["bark_device_keys"] == ["key_a", "key_b", "key_c"]

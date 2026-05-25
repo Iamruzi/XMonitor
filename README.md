@@ -214,11 +214,15 @@ alpha猎手｜wx好友流星｜流星（@0xliuxing）
 /auth del <chat_id>           删除授权
 /auth rename <chat_id> <备注> 修改授权备注
 /wxpusher status              查看 WxPusher 配置
+/wxpusher on                  开启 WxPusher 通知
+/wxpusher off                 暂停 WxPusher 通知
 /wxpusher token <AppToken>    保存 WxPusher AppToken
 /wxpusher add <UID>           增加 WxPusher 接收人
 /wxpusher del <UID>           删除 WxPusher 接收人
 /wxpusher test                发送测试消息
 /bark status                  查看 Bark 配置
+/bark on                      开启 Bark 通知
+/bark off                     暂停 Bark 通知
 /bark server https://api.day.app 设置 Bark 服务地址
 /bark add <设备码>             增加 Bark 设备码
 /bark del <设备码>             删除 Bark 设备码
@@ -249,6 +253,7 @@ alpha猎手｜wx好友流星｜流星（@0xliuxing）
 
 - AppToken
 - 一个或多个接收人 UID
+- 通知开关，关闭后保留配置但不发送 WxPusher 通知
 
 WxPusher 使用 HTML 内容类型。通知中的 X 用户名、关注对象、正文里的 `@用户名` 和普通链接会尽量转成可点击链接。
 
@@ -258,6 +263,7 @@ WxPusher 使用 HTML 内容类型。通知中的 X 用户名、关注对象、�
 
 - Bark 服务地址，默认 `https://api.day.app`
 - 一个或多个设备码
+- 通知开关，关闭后保留配置但不发送 Bark 通知
 - 推送分组
 - 通知级别：静默收纳、普通提醒、时效提醒、紧急提醒
 - 铃声名
