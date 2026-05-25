@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from .notifiers import WxPusherNotifier
+from .notifiers import BarkNotifier, WxPusherNotifier
 from .settings import MonitorSettings
 from .storage import MonitorStorage, normalize_handle
 
@@ -48,6 +48,7 @@ BOT_COMMANDS = [
     {"command": "group", "description": "批量改名或清空分组"},
     {"command": "auth", "description": "授权或删除 Telegram 群"},
     {"command": "wxpusher", "description": "管理 WxPusher 通知"},
+    {"command": "bark", "description": "管理 Bark 通知"},
 ]
 
 
@@ -134,6 +135,8 @@ class TelegramCommandBot:
                 return self._auth(args, source_chat_id, source_chat_title)
             if command == "/wxpusher":
                 return self._wxpusher(args)
+            if command == "/bark":
+                return self._bark(args)
         except ValueError as exc:
             return "操作失败：%s" % exc
         except Exception:
@@ -180,12 +183,20 @@ class TelegramCommandBot:
                 "/wxpusher add <UID> 增加接收人",
                 "/wxpusher del <UID> 删除接收人",
                 "/wxpusher test 发送测试消息",
+                "/bark status 查看 Bark 配置",
+                "/bark add <设备码> 增加 Bark 设备码",
+                "/bark del <设备码> 删除 Bark 设备码",
+                "/bark level 普通|时效|紧急 设置通知级别",
+                "/bark sound <铃声名> 设置铃声，用 - 清空",
+                "/bark call 开|关 设置紧急持续响铃",
+                "/bark test 发送 Bark 测试消息",
             ]
         )
 
     def _status(self) -> str:
         stats = self.storage.stats()
         wx_token, wx_uids, _proxy = self._wxpusher_config()
+        bark_server, bark_keys, bark_level, _sound, _group, bark_call, _volume, _proxy = self._bark_config()
         authorized_chats = self.storage.get_telegram_authorized_chats()
         return "\n".join(
             [
@@ -196,6 +207,13 @@ class TelegramCommandBot:
                 "Telegram 授权群：%s 个" % len(authorized_chats),
                 "WxPusher：%s，接收人 %s 个"
                 % ("已配置" if wx_token and wx_uids else "未配置", len(wx_uids)),
+                "Bark：%s，设备 %s 个，级别 %s%s"
+                % (
+                    "已配置" if bark_server and bark_keys else "未配置",
+                    len(bark_keys),
+                    self._bark_level_label(bark_level),
+                    "，持续响铃" if bark_call else "",
+                ),
             ]
         )
 
@@ -410,6 +428,97 @@ class TelegramCommandBot:
             raise ValueError(result.error or "测试发送失败")
         return "WxPusher 测试消息已发送。"
 
+    def _bark(self, args: list[str]) -> str:
+        if not args or args[0].lower() == "status":
+            server_url, keys, level, sound, group, call, volume, _proxy = self._bark_config()
+            return "\n".join(
+                [
+                    "Bark 配置：",
+                    "服务地址：%s" % (server_url or "未配置"),
+                    "设备码：%s" % ("、".join(self._mask(key) for key in keys) if keys else "未配置"),
+                    "通知级别：%s" % self._bark_level_label(level),
+                    "紧急持续响铃：%s" % ("开启" if call else "关闭"),
+                    "响铃音量：%s" % volume,
+                    "铃声：%s" % (sound or "默认"),
+                    "推送分组：%s" % (group or "XMonitor"),
+                ]
+            )
+        action = args[0].lower()
+        if action == "server":
+            if len(args) < 2:
+                raise ValueError("格式：/bark server https://api.day.app")
+            self.storage.update_bark_settings(bark_server_url=args[1])
+            return "已保存 Bark 服务地址。"
+        if action in {"add", "key"}:
+            if len(args) < 2:
+                raise ValueError("格式：/bark add <设备码>")
+            settings = self.storage.update_bark_settings(bark_add_device_key=args[1])
+            return "已增加 Bark 设备码，当前 %s 个。" % len(settings["bark_device_keys"])
+        if action in {"del", "delete", "remove"}:
+            if len(args) < 2:
+                raise ValueError("格式：/bark del <设备码>")
+            settings = self.storage.update_bark_settings(bark_remove_device_key=args[1])
+            return "已删除 Bark 设备码，当前 %s 个。" % len(settings["bark_device_keys"])
+        if action == "level":
+            if len(args) < 2:
+                raise ValueError("格式：/bark level 普通|时效|紧急")
+            level = self._normalize_bark_level(args[1])
+            self.storage.update_bark_settings(bark_level=level)
+            return "已设置 Bark 通知级别：%s。" % self._bark_level_label(level)
+        if action == "sound":
+            if len(args) < 2:
+                raise ValueError("格式：/bark sound <铃声名>，用 - 清空")
+            sound = "" if args[1] in {"-", "默认", "none", "default"} else args[1]
+            self.storage.update_bark_settings(bark_sound=sound)
+            return "已设置 Bark 铃声：%s。" % (sound or "默认")
+        if action == "group":
+            if len(args) < 2:
+                raise ValueError("格式：/bark group <推送分组>")
+            group = " ".join(args[1:])
+            self.storage.update_bark_settings(bark_group=group)
+            return "已设置 Bark 推送分组：%s。" % group
+        if action == "call":
+            if len(args) < 2:
+                raise ValueError("格式：/bark call 开|关")
+            value = self._parse_switch(args[1])
+            self.storage.update_bark_settings(bark_call=value)
+            return "已%s Bark 紧急持续响铃。" % ("开启" if value else "关闭")
+        if action == "volume":
+            if len(args) < 2:
+                raise ValueError("格式：/bark volume 0-10")
+            volume = min(max(int(args[1]), 0), 10)
+            self.storage.update_bark_settings(bark_volume=volume)
+            return "已设置 Bark 紧急音量：%s。" % volume
+        if action == "test":
+            return self._bark_test()
+        raise ValueError("未知 Bark 操作，发送 /help 查看命令。")
+
+    def _bark_test(self) -> str:
+        server_url, keys, level, sound, group, call, volume, proxy = self._bark_config()
+        if not server_url or not keys:
+            raise ValueError("请先配置 Bark 服务地址和设备码")
+        result = BarkNotifier(
+            server_url,
+            keys,
+            level=level,
+            sound=sound,
+            group=group,
+            call=call,
+            volume=volume,
+            proxy=proxy,
+        ).send_event(
+            {
+                "event_type": "test",
+                "target_handle": "monitor",
+                "title": "Bark 测试通知",
+                "body": "如果你看到这条消息，说明 Bark 通知已经配置成功。",
+                "url": "",
+            }
+        )
+        if not result.sent:
+            raise ValueError(result.error or "测试发送失败")
+        return "Bark 测试消息已发送。"
+
     def _parse_watch_flags(self, names: list[str]) -> dict[str, bool]:
         flags = {
             "monitor_tweets": True,
@@ -483,8 +592,74 @@ class TelegramCommandBot:
         proxy = self.storage.get_app_setting("telegram_proxy") or self.settings.telegram_proxy
         return str(token or ""), [str(uid) for uid in uids], proxy
 
+    def _bark_config(self) -> tuple[str, list[str], str, str, str, bool, int, str]:
+        bark_settings = self.storage.get_bark_settings()
+        server_url = bark_settings.get("bark_server_url") or self.settings.bark_server_url
+        keys = bark_settings.get("bark_device_keys") or self._split_uids(self.settings.bark_device_keys)
+        level = bark_settings.get("bark_level") or self.settings.bark_level
+        sound = bark_settings.get("bark_sound") or self.settings.bark_sound
+        group = bark_settings.get("bark_group") or self.settings.bark_group
+        call = self._setting_bool(bark_settings.get("bark_call"), self.settings.bark_call)
+        volume = min(max(self._setting_int(bark_settings.get("bark_volume"), self.settings.bark_volume), 0), 10)
+        proxy = self.storage.get_app_setting("telegram_proxy") or self.settings.telegram_proxy
+        return (
+            str(server_url or ""),
+            [str(key) for key in keys],
+            self._normalize_bark_level(str(level or "")),
+            str(sound or ""),
+            str(group or "XMonitor"),
+            call,
+            volume,
+            proxy,
+        )
+
     def _split_uids(self, raw: str) -> list[str]:
         return [uid.strip() for uid in raw.replace(";", ",").split(",") if uid.strip()]
+
+    def _parse_switch(self, value: str) -> bool:
+        normalized = value.strip().lower()
+        if normalized in ON_WORDS:
+            return True
+        if normalized in OFF_WORDS:
+            return False
+        raise ValueError("状态只能是：开 或 关")
+
+    def _setting_bool(self, raw: Any, default: bool) -> bool:
+        if raw in (None, ""):
+            return default
+        return str(raw).strip().lower() in ON_WORDS
+
+    def _setting_int(self, raw: Any, default: int) -> int:
+        try:
+            return int(str(raw))
+        except (TypeError, ValueError):
+            return default
+
+    def _normalize_bark_level(self, value: str) -> str:
+        normalized = str(value or "").strip()
+        aliases = {
+            "被动": "passive",
+            "普通": "active",
+            "默认": "active",
+            "及时": "timeSensitive",
+            "时效": "timeSensitive",
+            "紧急": "critical",
+            "critical": "critical",
+            "timesensitive": "timeSensitive",
+            "timeSensitive": "timeSensitive",
+            "active": "active",
+            "passive": "passive",
+        }
+        return aliases.get(normalized, aliases.get(normalized.lower(), "active"))
+
+    def _bark_level_label(self, level: str) -> str:
+        labels = {
+            "passive": "被动",
+            "active": "普通",
+            "timeSensitive": "时效",
+            "critical": "紧急",
+        }
+        return labels.get(self._normalize_bark_level(level), "普通")
 
     def _telegram_request(self, token: str, method: str, payload: dict[str, Any], proxy: str) -> dict[str, Any]:
         request = urllib.request.Request(
@@ -554,6 +729,8 @@ class TelegramCommandBot:
             return self._auth_guide(source_chat_id, source_chat_title), self._menu_markup()
         if data == "menu:wxpusher":
             return self._wxpusher_guide(), self._menu_markup()
+        if data == "menu:bark":
+            return self._bark_guide(), self._menu_markup()
         return self._help(), self._menu_markup()
 
     def _menu_markup(self) -> dict[str, Any]:
@@ -574,6 +751,7 @@ class TelegramCommandBot:
                 [
                     {"text": "授权群", "callback_data": "menu:auth"},
                     {"text": "WxPusher", "callback_data": "menu:wxpusher"},
+                    {"text": "Bark", "callback_data": "menu:bark"},
                 ],
                 [{"text": "返回菜单", "callback_data": "menu:home"}],
             ]
@@ -641,6 +819,25 @@ class TelegramCommandBot:
                 "/wxpusher add <UID>",
                 "/wxpusher del <UID>",
                 "/wxpusher test",
+            ]
+        )
+
+    def _bark_guide(self) -> str:
+        return "\n".join(
+            [
+                "Bark 管理：",
+                "/bark status",
+                "/bark server https://api.day.app",
+                "/bark add <设备码>",
+                "/bark del <设备码>",
+                "/bark level 普通",
+                "/bark level 时效",
+                "/bark level 紧急",
+                "/bark call 开",
+                "/bark sound minuet",
+                "/bark sound -",
+                "/bark volume 8",
+                "/bark test",
             ]
         )
 

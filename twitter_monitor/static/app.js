@@ -175,6 +175,7 @@ async function loadConfig() {
   const channels = [];
   if (notification.telegramConfigured) channels.push("Telegram");
   if (notification.wxpusherConfigured) channels.push("WxPusher");
+  if (notification.barkConfigured) channels.push("Bark");
   $("metricTelegram").textContent = channels.length ? channels.join(" + ") : "未配置";
 
   const minPoll = state.config.pollIntervalMinSeconds || state.config.pollIntervalSeconds || 300;
@@ -410,6 +411,17 @@ function wxpusherRow(uid = "") {
   return row;
 }
 
+function barkDeviceRow(deviceKey = "") {
+  const row = document.createElement("div");
+  row.className = "editable-row two";
+  row.innerHTML = `
+    <input data-field="device_key" type="text" value="${escapeHtml(deviceKey)}" placeholder="Bark 设备码" />
+    <button data-action="remove" type="button">删除</button>
+  `;
+  row.querySelector('[data-action="remove"]').addEventListener("click", () => row.remove());
+  return row;
+}
+
 function groupRow(group) {
   const row = document.createElement("div");
   row.className = "group-row";
@@ -484,6 +496,12 @@ function renderSettings(notification) {
   $("wxpusherToken").placeholder = notification.wxpusherAppTokenSaved
     ? `已保存：${notification.wxpusherAppTokenPreview}`
     : "";
+  $("barkServerUrl").value = notification.barkServerUrl || "https://api.day.app";
+  $("barkGroup").value = notification.barkGroup || "XMonitor";
+  $("barkLevel").value = notification.barkLevel || "active";
+  $("barkSound").value = notification.barkSound || "";
+  $("barkCall").checked = Boolean(notification.barkCall);
+  $("barkVolume").value = Number(notification.barkVolume ?? 5);
 
   const telegramList = $("telegramRecipients");
   telegramList.innerHTML = "";
@@ -494,6 +512,11 @@ function renderSettings(notification) {
   wxList.innerHTML = "";
   (notification.wxpusherUids || []).forEach((uid) => wxList.appendChild(wxpusherRow(uid)));
   if (!notification.wxpusherUids || !notification.wxpusherUids.length) wxList.appendChild(wxpusherRow());
+
+  const barkList = $("barkDeviceKeys");
+  barkList.innerHTML = "";
+  (notification.barkDeviceKeys || []).forEach((deviceKey) => barkList.appendChild(barkDeviceRow(deviceKey)));
+  if (!notification.barkDeviceKeys || !notification.barkDeviceKeys.length) barkList.appendChild(barkDeviceRow());
 }
 
 async function loadGroups() {
@@ -518,6 +541,12 @@ function collectTelegramRecipients() {
 
 function collectWxpusherUids() {
   return [...$("wxpusherRecipients").querySelectorAll('[data-field="uid"]')]
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+}
+
+function collectBarkDeviceKeys() {
+  return [...$("barkDeviceKeys").querySelectorAll('[data-field="device_key"]')]
     .map((input) => input.value.trim())
     .filter(Boolean);
 }
@@ -653,6 +682,7 @@ $("closeSettingsBackdrop").addEventListener("click", () => $("settingsDrawer").c
 
 $("addTelegramRecipient").addEventListener("click", () => $("telegramRecipients").appendChild(recipientRow()));
 $("addWxpusherRecipient").addEventListener("click", () => $("wxpusherRecipients").appendChild(wxpusherRow()));
+$("addBarkDeviceKey").addEventListener("click", () => $("barkDeviceKeys").appendChild(barkDeviceRow()));
 
 $("addGroup").addEventListener("click", async () => {
   const name = $("newGroupInput").value.trim();
@@ -785,6 +815,13 @@ $("notificationForm").addEventListener("submit", async (event) => {
         telegram_proxy: $("telegramProxy").value.trim(),
         wxpusher_app_token: $("wxpusherToken").value.trim() || null,
         wxpusher_uids: collectWxpusherUids(),
+        bark_server_url: $("barkServerUrl").value.trim(),
+        bark_device_keys: collectBarkDeviceKeys(),
+        bark_level: $("barkLevel").value,
+        bark_sound: $("barkSound").value.trim(),
+        bark_group: $("barkGroup").value.trim(),
+        bark_call: $("barkCall").checked,
+        bark_volume: Number($("barkVolume").value || 5),
       }),
     });
     $("telegramToken").value = "";

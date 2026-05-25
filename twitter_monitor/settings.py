@@ -37,6 +37,13 @@ class MonitorSettings:
     wxpusher_app_token: str
     wxpusher_uids: str
     telegram_commands_enabled: bool
+    bark_server_url: str = "https://api.day.app"
+    bark_device_keys: str = ""
+    bark_level: str = "active"
+    bark_sound: str = ""
+    bark_group: str = "XMonitor"
+    bark_call: bool = False
+    bark_volume: int = 5
 
     @property
     def telegram_configured(self) -> bool:
@@ -45,6 +52,10 @@ class MonitorSettings:
     @property
     def wxpusher_configured(self) -> bool:
         return bool(self.wxpusher_app_token and self.wxpusher_uids)
+
+    @property
+    def bark_configured(self) -> bool:
+        return bool(self.bark_server_url and self.bark_device_keys)
 
     @property
     def admin_required(self) -> bool:
@@ -75,4 +86,11 @@ def load_settings() -> MonitorSettings:
         wxpusher_app_token=os.environ.get("WXPUSHER_APP_TOKEN", ""),
         wxpusher_uids=os.environ.get("WXPUSHER_UIDS", ""),
         telegram_commands_enabled=_as_bool(os.environ.get("MONITOR_TG_COMMANDS"), True),
+        bark_server_url=os.environ.get("BARK_SERVER_URL", "https://api.day.app"),
+        bark_device_keys=os.environ.get("BARK_DEVICE_KEYS", "") or os.environ.get("BARK_DEVICE_KEY", ""),
+        bark_level=os.environ.get("BARK_LEVEL", "active"),
+        bark_sound=os.environ.get("BARK_SOUND", ""),
+        bark_group=os.environ.get("BARK_GROUP", "XMonitor"),
+        bark_call=_as_bool(os.environ.get("BARK_CALL"), False),
+        bark_volume=_as_int(os.environ.get("BARK_VOLUME"), 5, minimum=0),
     )

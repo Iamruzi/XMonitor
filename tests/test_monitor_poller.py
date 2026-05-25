@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 
 from twitter_cli.models import Author, Metrics, Tweet, UserProfile
-from twitter_monitor.notifiers import EventFormatter, TelegramNotifier, WxPusherNotifier
+from twitter_monitor.notifiers import BarkNotifier, EventFormatter, TelegramNotifier, WxPusherNotifier
 from twitter_monitor.notifiers import NotificationResult
 from twitter_monitor.poller import MonitorPoller
 from twitter_monitor.settings import MonitorSettings
@@ -290,6 +290,73 @@ def test_wxpusher_notifier_sends_html_payload(monkeypatch) -> None:
     assert opener.payload["contentType"] == 2
     assert "alpha猎手｜wx好友流星｜CryptoZen（@CryptoZen911） 新增关注" in opener.payload["summary"]
     assert '<a href="https://x.com/elonmusk">Elon Musk（@elonmusk）</a>' in opener.payload["content"]
+
+
+def test_bark_notifier_sends_critical_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "twitter_monitor.notifiers.LibreTranslateClient.translate_to_chinese",
+        lambda self, text: "",
+    )
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"code":200,"message":"success"}'
+
+    class FakeOpener:
+        def __init__(self) -> None:
+            self.payload = None
+            self.url = ""
+
+        def open(self, request, timeout):
+            self.url = request.full_url
+            self.payload = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+    opener = FakeOpener()
+    notifier = BarkNotifier(
+        "https://api.day.app",
+        ["key-a", "key-b"],
+        level="active",
+        sound="minuet",
+        group="XMonitor",
+        call=True,
+        volume=8,
+    )
+    notifier._opener = lambda: opener  # type: ignore[method-assign]
+
+    result = notifier.send_event(
+        {
+            "event_type": "tweet",
+            "target_handle": "alice",
+            "target_name": "Alice",
+            "target_group_name": "alpha",
+            "target_remark_name": "friend",
+            "title": "测试通知",
+            "body": "hello",
+            "url": "https://x.com/alice/status/1",
+            "detected_at": "2026-05-22T14:57:15Z",
+            "payload_json": "{}",
+        }
+    )
+
+    assert result.sent is True
+    assert opener.url == "https://api.day.app/push"
+    payload = opener.payload
+    assert payload["device_keys"] == ["key-a", "key-b"]
+    assert payload["level"] == "critical"
+    assert payload["call"] == "1"
+    assert payload["sound"] == "minuet"
+    assert payload["group"] == "XMonitor"
+    assert payload["volume"] == "8"
+    assert payload["url"] == "https://x.com/alice/status/1"
 
 
 def test_telegram_notifier_sends_to_multiple_chats(monkeypatch) -> None:

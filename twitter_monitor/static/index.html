@@ -12,7 +12,7 @@
         <div>
           <p class="eyebrow">X 用户监控台</p>
           <h1>登录监控工作台</h1>
-          <p class="subtitle">管理监控用户、事件筛选、Telegram 和 WxPusher 通知</p>
+          <p class="subtitle">管理监控用户、事件筛选、Telegram、WxPusher 和 Bark 通知</p>
         </div>
         <form id="loginForm" class="login-form">
           <label>
@@ -272,6 +272,49 @@
           </section>
 
           <section class="setting-section">
+            <h3>Bark</h3>
+            <div class="field-grid">
+              <label>
+                <span>服务地址</span>
+                <input id="barkServerUrl" type="text" placeholder="https://api.day.app" autocomplete="off" />
+              </label>
+              <label>
+                <span>推送分组</span>
+                <input id="barkGroup" type="text" placeholder="XMonitor" autocomplete="off" />
+              </label>
+            </div>
+            <div class="editable-list-head">
+              <strong>设备码</strong>
+              <span>Bark App 里的设备码，可添加多个设备</span>
+            </div>
+            <div id="barkDeviceKeys" class="editable-list"></div>
+            <button id="addBarkDeviceKey" type="button">增加 Bark 设备码</button>
+            <div class="field-grid three">
+              <label>
+                <span>通知级别</span>
+                <select id="barkLevel">
+                  <option value="active">普通提醒</option>
+                  <option value="timeSensitive">时效提醒</option>
+                  <option value="critical">紧急提醒</option>
+                  <option value="passive">静默收纳</option>
+                </select>
+              </label>
+              <label>
+                <span>铃声</span>
+                <input id="barkSound" type="text" list="barkSoundOptions" placeholder="默认" autocomplete="off" />
+              </label>
+              <label>
+                <span>紧急音量</span>
+                <input id="barkVolume" type="number" min="0" max="10" value="5" />
+              </label>
+            </div>
+            <label class="inline-check">
+              <input id="barkCall" type="checkbox" />
+              <span>紧急持续响铃，发送时自动按紧急提醒处理</span>
+            </label>
+          </section>
+
+          <section class="setting-section">
             <h3>管理安全</h3>
             <p class="hint">管理密码用于保护所有增删改查 API。默认密码是 Vip.123456，部署到公网后建议用环境变量 MONITOR_ADMIN_TOKEN 修改。</p>
           </section>
@@ -285,6 +328,20 @@
     </aside>
 
     <datalist id="groupOptions"></datalist>
+    <datalist id="barkSoundOptions">
+      <option value="alarm"></option>
+      <option value="bell"></option>
+      <option value="birdsong"></option>
+      <option value="chord"></option>
+      <option value="electronic"></option>
+      <option value="glass"></option>
+      <option value="horn"></option>
+      <option value="minuet"></option>
+      <option value="multiwayinvitation"></option>
+      <option value="newsflash"></option>
+      <option value="silence"></option>
+      <option value="telegraph"></option>
+    </datalist>
     <script src="/static/app.js"></script>
   </body>
 </html>

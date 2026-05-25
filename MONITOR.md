@@ -1,7 +1,7 @@
 # X 用户监控台
 
 这是基于 `twitter-cli` 做的轻量监控平台。它复用现有的 X/Twitter Cookie 登录能力，
-提供一个中文 Web 控制台，用来管理监控用户、监控状态、Telegram 通知和 WxPusher 通知。
+提供一个中文 Web 控制台，用来管理监控用户、监控状态、Telegram、WxPusher 和 Bark 通知。
 
 ## 能监控什么
 
@@ -42,7 +42,7 @@ http://127.0.0.1:8000
 ## 管理密码有什么用
 
 管理密码用于保护 Web 控制台和所有会修改数据的接口，包括添加/删除监控用户、修改监控行为、
-保存 Telegram/WxPusher 配置、立即检查和查看受保护的数据列表。前端登录后会把密码保存在浏览器本地，
+保存 Telegram/WxPusher/Bark 配置、立即检查和查看受保护的数据列表。前端登录后会把密码保存在浏览器本地，
 后续请求会通过 `X-Admin-Token` 请求头带给后端。
 
 默认密码是 `Vip.123456`，只是为了本地启动后可以直接使用。只要准备放到公网、免费托管平台或共享网络，
@@ -54,7 +54,7 @@ $env:MONITOR_ADMIN_TOKEN="换成你自己的强密码"
 
 ## 通知渠道
 
-可以直接在前端页面里配置 Telegram 和 WxPusher。
+可以直接在前端页面里配置 Telegram、WxPusher 和 Bark。
 
 ## 分组和备注名
 
@@ -100,6 +100,13 @@ WxPusher 需要：
 
 WxPusher 消息使用 HTML 格式，通知里的 X 用户名、关注对象、正文里的 `@用户名` 和普通链接都会尽量转成可点击链接。
 
+Bark 需要：
+
+- 服务地址，默认 `https://api.day.app`
+- 设备码，可以添加多个
+- 通知级别、铃声、推送分组
+- 可选：紧急持续响铃和紧急音量
+
 Token 会保存到本地 SQLite，不会在接口和页面里回显完整明文。
 
 也可以用环境变量提前配置：
@@ -110,6 +117,9 @@ $env:TELEGRAM_CHAT_ID="123456789"
 $env:TELEGRAM_PROXY="http://127.0.0.1:7897"
 $env:WXPUSHER_APP_TOKEN="AT_xxx"
 $env:WXPUSHER_UIDS="UID_xxx,UID_yyy"
+$env:BARK_DEVICE_KEY="你的 Bark 设备码"
+$env:BARK_LEVEL="active"
+$env:BARK_SOUND="minuet"
 ```
 
 如果没有设置 `TELEGRAM_PROXY`，系统会默认复用 `TWITTER_PROXY`。
@@ -149,12 +159,21 @@ $env:WXPUSHER_UIDS="UID_xxx,UID_yyy"
 /wxpusher add <UID>         增加 WxPusher 接收人
 /wxpusher del <UID>         删除 WxPusher 接收人
 /wxpusher test              发送 WxPusher 测试消息
+/bark status                查看 Bark 配置
+/bark server https://api.day.app 设置 Bark 服务地址
+/bark add <设备码>           增加 Bark 设备码
+/bark del <设备码>           删除 Bark 设备码
+/bark level 普通|时效|紧急    设置通知级别
+/bark sound <铃声名>         设置铃声，用 - 清空
+/bark call 开|关             设置紧急持续响铃
+/bark volume 0-10           设置紧急音量
+/bark test                  发送 Bark 测试消息
 ```
 
 默认只有“接收消息的聊天 ID”有管理权限。把 Bot 拉到新群以后，先在新群里发：
 
 发送 `/start`、`/help` 或 `/menu` 会出现带按钮的文字引导菜单，里面包含添加用户、行为开关、
-分组备注、群授权和 WxPusher 的操作说明。Bot 同时保留 Telegram 原生命令菜单。
+分组备注、群授权、WxPusher 和 Bark 的操作说明。Bot 同时保留 Telegram 原生命令菜单。
 
 ```text
 /auth me
@@ -186,6 +205,14 @@ $env:MONITOR_TG_COMMANDS="false"
 | `TELEGRAM_PROXY` | 否 | `TWITTER_PROXY` | Telegram 通知代理 |
 | `WXPUSHER_APP_TOKEN` | 否 | | WxPusher AppToken，也可在页面或 TG Bot 配置 |
 | `WXPUSHER_UIDS` | 否 | | WxPusher 接收人 UID，多个用逗号分隔 |
+| `BARK_SERVER_URL` | 否 | `https://api.day.app` | Bark 服务地址 |
+| `BARK_DEVICE_KEY` | 否 | | 单个 Bark 设备码 |
+| `BARK_DEVICE_KEYS` | 否 | | 多个 Bark 设备码，逗号分隔 |
+| `BARK_LEVEL` | 否 | `active` | Bark 级别：`passive`、`active`、`timeSensitive`、`critical` |
+| `BARK_SOUND` | 否 | | Bark 铃声名 |
+| `BARK_GROUP` | 否 | `XMonitor` | Bark 推送分组 |
+| `BARK_CALL` | 否 | `false` | 是否启用 Bark 持续响铃 |
+| `BARK_VOLUME` | 否 | `5` | Bark 紧急音量，0-10 |
 | `MONITOR_TG_COMMANDS` | 否 | `true` | 是否启用 Telegram Bot 管理命令 |
 | `MONITOR_ADMIN_TOKEN` | 否 | `Vip.123456` | 管理控制台和受保护 API 的密码 |
 | `MONITOR_DB_PATH` | 否 | `twitter-monitor.db` | SQLite 数据库路径 |

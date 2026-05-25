@@ -703,6 +703,59 @@ class MonitorStorage:
         self.set_app_setting("wxpusher_uids", json.dumps(self._normalize_uid_list(uids), ensure_ascii=False))
         return self.get_wxpusher_settings()
 
+    def get_bark_settings(self) -> dict[str, Any]:
+        return {
+            "bark_server_url": self.get_app_setting("bark_server_url"),
+            "bark_device_keys": self._json_list_setting("bark_device_keys"),
+            "bark_level": self.get_app_setting("bark_level"),
+            "bark_sound": self.get_app_setting("bark_sound"),
+            "bark_group": self.get_app_setting("bark_group"),
+            "bark_call": self.get_app_setting("bark_call"),
+            "bark_volume": self.get_app_setting("bark_volume"),
+        }
+
+    def update_bark_settings(
+        self,
+        *,
+        bark_server_url: str | None = None,
+        bark_device_keys: list[str] | None = None,
+        bark_add_device_key: str | None = None,
+        bark_remove_device_key: str | None = None,
+        bark_level: str | None = None,
+        bark_sound: str | None = None,
+        bark_group: str | None = None,
+        bark_call: bool | None = None,
+        bark_volume: int | None = None,
+    ) -> dict[str, Any]:
+        if bark_server_url is not None:
+            self.set_app_setting("bark_server_url", self._clean_url(bark_server_url))
+        if bark_level is not None:
+            self.set_app_setting("bark_level", self._normalize_bark_level(bark_level))
+        if bark_sound is not None:
+            self.set_app_setting("bark_sound", self._clean_label(bark_sound, limit=80))
+        if bark_group is not None:
+            self.set_app_setting("bark_group", self._clean_label(bark_group, limit=80))
+        if bark_call is not None:
+            self.set_app_setting("bark_call", "1" if bark_call else "0")
+        if bark_volume is not None:
+            self.set_app_setting("bark_volume", str(min(max(int(bark_volume), 0), 10)))
+
+        device_keys = self._json_list_setting("bark_device_keys")
+        if bark_device_keys is not None:
+            device_keys = self._normalize_uid_list(bark_device_keys)
+        if bark_add_device_key is not None and bark_add_device_key.strip():
+            device_key = bark_add_device_key.strip()
+            if device_key not in device_keys:
+                device_keys.append(device_key)
+        if bark_remove_device_key is not None and bark_remove_device_key.strip():
+            remove_key = bark_remove_device_key.strip()
+            device_keys = [device_key for device_key in device_keys if device_key != remove_key]
+        self.set_app_setting(
+            "bark_device_keys",
+            json.dumps(self._normalize_uid_list(device_keys), ensure_ascii=False),
+        )
+        return self.get_bark_settings()
+
     def _json_list_setting(self, key: str) -> list[str]:
         raw = self.get_app_setting(key, "[]")
         try:
@@ -751,3 +804,28 @@ class MonitorStorage:
 
     def _clean_label(self, value: str, limit: int = 80) -> str:
         return " ".join(str(value or "").split())[:limit]
+
+    def _clean_url(self, value: str) -> str:
+        url = str(value or "").strip().rstrip("/")
+        if not url:
+            return ""
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return "https://%s" % url
+        return url
+
+    def _normalize_bark_level(self, value: str) -> str:
+        normalized = str(value or "").strip()
+        aliases = {
+            "被动": "passive",
+            "普通": "active",
+            "默认": "active",
+            "及时": "timeSensitive",
+            "时效": "timeSensitive",
+            "紧急": "critical",
+            "critical": "critical",
+            "timesensitive": "timeSensitive",
+            "timeSensitive": "timeSensitive",
+            "active": "active",
+            "passive": "passive",
+        }
+        return aliases.get(normalized, aliases.get(normalized.lower(), "active"))

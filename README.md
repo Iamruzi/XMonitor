@@ -15,8 +15,9 @@ twitter-monitor
 - 事件中心支持按分组、用户、事件类型、通知结果筛选
 - Telegram 通知和 Telegram Bot 管理菜单
 - WxPusher HTML 通知，链接可点击
+- Bark iOS 通知，支持普通、时效、紧急、持续响铃和自定义铃声
 - 外文正文和简介自动尝试翻译成中文
-- 前端可配置 Telegram Bot Token、接收聊天、WxPusher AppToken、UID、轮询间隔
+- 前端可配置 Telegram Bot Token、接收聊天、WxPusher AppToken、UID、Bark 设备码、轮询间隔
 - 支持批量导入和导出监控用户
 - 支持后台自动轮询、随机抖动和失败退避
 - 支持 systemd 常驻部署和 Tailscale 内网访问
@@ -167,7 +168,7 @@ curl -x http://127.0.0.1:7890 https://translate.googleapis.com -I
 
 - 用户监控：按行管理用户、用户名、分组、备注、启停状态和监控行为
 - 最新事件：按分组、用户、事件类型和通知状态筛选
-- 设置：管理通知渠道、轮询间隔、分组、批量导入导出
+- 设置：管理通知渠道、Bark 通知级别、轮询间隔、分组、批量导入导出
 
 用户显示逻辑优先使用：
 
@@ -181,7 +182,7 @@ curl -x http://127.0.0.1:7890 https://translate.googleapis.com -I
 alpha猎手｜wx好友流星｜流星（@0xliuxing）
 ```
 
-这样 WxPusher 标题、Telegram 通知和前端事件列表都能清楚看出是哪一组、哪个人触发了事件。
+这样 WxPusher 标题、Bark 标题、Telegram 通知和前端事件列表都能清楚看出是哪一组、哪个人触发了事件。
 
 ## Telegram Bot 管理
 
@@ -217,6 +218,15 @@ alpha猎手｜wx好友流星｜流星（@0xliuxing）
 /wxpusher add <UID>           增加 WxPusher 接收人
 /wxpusher del <UID>           删除 WxPusher 接收人
 /wxpusher test                发送测试消息
+/bark status                  查看 Bark 配置
+/bark server https://api.day.app 设置 Bark 服务地址
+/bark add <设备码>             增加 Bark 设备码
+/bark del <设备码>             删除 Bark 设备码
+/bark level 普通|时效|紧急      设置通知级别
+/bark sound <铃声名>           设置铃声，用 - 清空
+/bark call 开|关               设置紧急持续响铃
+/bark volume 0-10             设置紧急音量
+/bark test                    发送 Bark 测试消息
 ```
 
 把 Bot 拉到新群后，先在新群发：
@@ -241,6 +251,19 @@ alpha猎手｜wx好友流星｜流星（@0xliuxing）
 - 一个或多个接收人 UID
 
 WxPusher 使用 HTML 内容类型。通知中的 X 用户名、关注对象、正文里的 `@用户名` 和普通链接会尽量转成可点击链接。
+
+## Bark 通知
+
+前端设置里可以配置：
+
+- Bark 服务地址，默认 `https://api.day.app`
+- 一个或多个设备码
+- 推送分组
+- 通知级别：静默收纳、普通提醒、时效提醒、紧急提醒
+- 铃声名
+- 紧急持续响铃和紧急音量
+
+打开“紧急持续响铃”后，XMonitor 发送 Bark 通知时会按紧急级别处理，并带上 `call=1`。适合你确实要被手机强提醒的监控项。普通监控建议使用“普通提醒”或“时效提醒”，避免手机通知过载。
 
 ## 批量导入导出
 
@@ -281,6 +304,14 @@ SkyAAmen,项目方,重点观察
 | `TELEGRAM_PROXY` | 否 | `TWITTER_PROXY` | Telegram 代理 |
 | `WXPUSHER_APP_TOKEN` | 否 | | WxPusher AppToken，也可前端配置 |
 | `WXPUSHER_UIDS` | 否 | | WxPusher UID，多个用逗号分隔 |
+| `BARK_SERVER_URL` | 否 | `https://api.day.app` | Bark 服务地址 |
+| `BARK_DEVICE_KEY` | 否 | | 单个 Bark 设备码 |
+| `BARK_DEVICE_KEYS` | 否 | | 多个 Bark 设备码，逗号分隔 |
+| `BARK_LEVEL` | 否 | `active` | Bark 级别：`passive`、`active`、`timeSensitive`、`critical` |
+| `BARK_SOUND` | 否 | | Bark 铃声名 |
+| `BARK_GROUP` | 否 | `XMonitor` | Bark 推送分组 |
+| `BARK_CALL` | 否 | `false` | 是否启用 Bark 持续响铃 |
+| `BARK_VOLUME` | 否 | `5` | Bark 紧急音量，0-10 |
 | `MONITOR_HOST` | 否 | `0.0.0.0` | 服务监听地址 |
 | `PORT` | 否 | `8000` | 服务端口 |
 | `MONITOR_DB_PATH` | 否 | `twitter-monitor.db` | SQLite 数据库路径 |
@@ -302,7 +333,7 @@ SkyAAmen,项目方,重点观察
 
 ## 数据和安全
 
-- X Cookie、Telegram Token、WxPusher Token 不要提交到 GitHub
+- X Cookie、Telegram Token、WxPusher Token、Bark 设备码不要提交到 GitHub
 - `.env`、`*.db`、`*.db-*` 已在 `.gitignore` 中排除
 - SQLite 数据库适合个人监控，服务器部署时要放到持久化目录
 - Web 管理密码默认是 `Vip.123456`，长期运行建议改成自己的强密码

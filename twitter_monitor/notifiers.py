@@ -474,6 +474,112 @@ class WxPusherNotifier:
         )
 
 
+class BarkNotifier:
+    def __init__(
+        self,
+        server_url: str,
+        device_keys: list[str],
+        *,
+        level: str = "active",
+        sound: str = "",
+        group: str = "XMonitor",
+        call: bool = False,
+        volume: int = 5,
+        proxy: str = "",
+    ) -> None:
+        self.server_url = (server_url or "https://api.day.app").strip().rstrip("/")
+        self.device_keys = [key for key in device_keys if key]
+        self.level = self._normalize_level(level)
+        self.sound = sound.strip()
+        self.group = group.strip() or "XMonitor"
+        self.call = call
+        self.volume = min(max(int(volume), 0), 10)
+        self.proxy = proxy
+        self.formatter = EventFormatter(proxy)
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.server_url and self.device_keys)
+
+    def send_event(self, event: dict[str, Any]) -> NotificationResult:
+        if not self.configured:
+            return NotificationResult(False, "bark_not_configured")
+        effective_level = "critical" if self.call else self.level
+        payload = {
+            "title": self.formatter.summary(event),
+            "body": _clip(self.formatter.format_text(event), 1800),
+            "group": self.group,
+            "level": effective_level,
+            "isArchive": "1",
+        }  # type: dict[str, Any]
+        if len(self.device_keys) == 1:
+            payload["device_key"] = self.device_keys[0]
+        else:
+            payload["device_keys"] = self.device_keys
+        if event.get("url"):
+            payload["url"] = str(event.get("url") or "")
+        if self.sound:
+            payload["sound"] = self.sound
+        if self.call:
+            payload["call"] = "1"
+        if effective_level == "critical":
+            payload["volume"] = str(self.volume)
+        request = urllib.request.Request(
+            self._endpoint(),
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            opener = self._opener()
+            with opener.open(request, timeout=15) as response:
+                body = response.read().decode("utf-8", errors="replace")
+                if response.status >= 400:
+                    return NotificationResult(False, "bark_http_%d: %s" % (response.status, body[:200]))
+                try:
+                    data = json.loads(body)
+                except ValueError:
+                    data = {}
+                code = data.get("code") if isinstance(data, dict) else None
+                if code not in (None, 200, 1000):
+                    return NotificationResult(False, "bark_%s: %s" % (code, data.get("message", "")))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:200]
+            return NotificationResult(False, "bark_http_%d: %s" % (exc.code, detail))
+        except Exception as exc:
+            return NotificationResult(False, "%s: %s" % (type(exc).__name__, exc))
+        return NotificationResult(True)
+
+    def _endpoint(self) -> str:
+        if self.server_url.endswith("/push"):
+            return self.server_url
+        return "%s/push" % self.server_url
+
+    def _opener(self) -> urllib.request.OpenerDirector:
+        if not self.proxy:
+            return urllib.request.build_opener()
+        return urllib.request.build_opener(
+            urllib.request.ProxyHandler({"http": self.proxy, "https": self.proxy})
+        )
+
+    def _normalize_level(self, level: str) -> str:
+        normalized = str(level or "").strip()
+        aliases = {
+            "被动": "passive",
+            "普通": "active",
+            "默认": "active",
+            "及时": "timeSensitive",
+            "时效": "timeSensitive",
+            "紧急": "critical",
+            "critical": "critical",
+            "timesensitive": "timeSensitive",
+            "timeSensitive": "timeSensitive",
+            "active": "active",
+            "passive": "passive",
+        }
+        return aliases.get(normalized, aliases.get(normalized.lower(), "active"))
+
+
 class CompositeNotifier:
     def __init__(self, adapters: list[Any]) -> None:
         self.adapters = adapters

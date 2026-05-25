@@ -87,6 +87,15 @@ class NotificationSettingsUpdate(BaseModel):
     wxpusher_add_uid: str | None = None
     wxpusher_remove_uid: str | None = None
     clear_wxpusher_app_token: bool = False
+    bark_server_url: str | None = None
+    bark_device_keys: list[str] | None = None
+    bark_add_device_key: str | None = None
+    bark_remove_device_key: str | None = None
+    bark_level: str | None = None
+    bark_sound: str | None = None
+    bark_group: str | None = None
+    bark_call: bool | None = None
+    bark_volume: int | None = None
 
 
 class UserResolve(BaseModel):
@@ -131,6 +140,19 @@ def _split_list(value: str) -> list[str]:
     return [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
 
 
+def _setting_bool(value: Any, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "开", "开启"}
+
+
+def _setting_int(value: Any, default: int) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
 def _notification_config() -> dict[str, Any]:
     db_settings = storage.get_notification_settings()
     db_token = db_settings.get("telegram_bot_token", "")
@@ -144,8 +166,18 @@ def _notification_config() -> dict[str, Any]:
     wx_settings = storage.get_wxpusher_settings()
     wx_token = wx_settings.get("wxpusher_app_token") or settings.wxpusher_app_token
     wx_uids = wx_settings.get("wxpusher_uids") or _split_list(settings.wxpusher_uids)
+    bark_settings = storage.get_bark_settings()
+    bark_server_url = bark_settings.get("bark_server_url") or settings.bark_server_url
+    bark_device_keys = bark_settings.get("bark_device_keys") or _split_list(settings.bark_device_keys)
+    bark_level = bark_settings.get("bark_level") or settings.bark_level
+    bark_sound = bark_settings.get("bark_sound") or settings.bark_sound
+    bark_group = bark_settings.get("bark_group") or settings.bark_group
+    bark_call = _setting_bool(bark_settings.get("bark_call"), settings.bark_call)
+    bark_volume = min(max(_setting_int(bark_settings.get("bark_volume"), settings.bark_volume), 0), 10)
     return {
-        "notificationConfigured": bool((token and telegram_chat_ids) or (wx_token and wx_uids)),
+        "notificationConfigured": bool(
+            (token and telegram_chat_ids) or (wx_token and wx_uids) or (bark_server_url and bark_device_keys)
+        ),
         "telegramConfigured": bool(token and telegram_chat_ids),
         "telegramBotTokenSaved": bool(token),
         "telegramBotTokenPreview": _mask_secret(token),
@@ -160,6 +192,16 @@ def _notification_config() -> dict[str, Any]:
         "wxpusherAppTokenSaved": bool(wx_token),
         "wxpusherAppTokenPreview": _mask_secret(str(wx_token or "")),
         "wxpusherUids": wx_uids,
+        "barkConfigured": bool(bark_server_url and bark_device_keys),
+        "barkServerUrl": bark_server_url,
+        "barkDeviceKeys": bark_device_keys,
+        "barkDeviceKeyCount": len(bark_device_keys),
+        "barkDeviceKeyPreview": [_mask_secret(str(key)) for key in bark_device_keys],
+        "barkLevel": bark_level,
+        "barkSound": bark_sound,
+        "barkGroup": bark_group,
+        "barkCall": bark_call,
+        "barkVolume": bark_volume,
         "source": source,
     }
 
@@ -265,6 +307,7 @@ def config() -> dict[str, Any]:
         "notificationConfigured": notification["notificationConfigured"],
         "telegramConfigured": notification["telegramConfigured"],
         "wxpusherConfigured": notification["wxpusherConfigured"],
+        "barkConfigured": notification["barkConfigured"],
         "telegramProxyConfigured": notification["telegramProxyConfigured"],
         "backgroundWorker": settings.background_worker,
         "pollIntervalSeconds": poll_config["pollIntervalMaxSeconds"],
@@ -472,6 +515,17 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
         wxpusher_remove_uid=payload.wxpusher_remove_uid,
         clear_wxpusher_app_token=payload.clear_wxpusher_app_token,
     )
+    storage.update_bark_settings(
+        bark_server_url=payload.bark_server_url,
+        bark_device_keys=payload.bark_device_keys,
+        bark_add_device_key=payload.bark_add_device_key,
+        bark_remove_device_key=payload.bark_remove_device_key,
+        bark_level=payload.bark_level,
+        bark_sound=payload.bark_sound,
+        bark_group=payload.bark_group,
+        bark_call=payload.bark_call,
+        bark_volume=payload.bark_volume,
+    )
     return {"data": _notification_config()}
 
 
@@ -479,7 +533,7 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
 async def test_notification() -> dict[str, Any]:
     config_data = _notification_config()
     if not config_data["notificationConfigured"]:
-        raise HTTPException(status_code=400, detail="请先配置 Telegram 或 WxPusher 通知")
+        raise HTTPException(status_code=400, detail="请先配置 Telegram、WxPusher 或 Bark 通知")
     result = await asyncio.to_thread(
         poller._notification_adapter().send_event,
         {

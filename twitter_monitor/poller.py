@@ -10,7 +10,7 @@ from twitter_cli.client import TwitterClient, set_runtime_proxy
 from twitter_cli.config import load_config
 from twitter_cli.serialization import tweet_to_dict, user_profile_to_dict
 
-from .notifiers import CompositeNotifier, TelegramNotifier, WxPusherNotifier
+from .notifiers import BarkNotifier, CompositeNotifier, TelegramNotifier, WxPusherNotifier
 from .settings import MonitorSettings
 from .storage import MonitorStorage
 
@@ -245,7 +245,30 @@ class MonitorPoller:
             [str(uid) for uid in wx_uids],
             db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
         )
-        return CompositeNotifier([telegram, wxpusher])
+        bark_settings = self.storage.get_bark_settings()
+        bark_keys = bark_settings.get("bark_device_keys") or self._split_uids(self.settings.bark_device_keys)
+        bark = BarkNotifier(
+            str(bark_settings.get("bark_server_url") or self.settings.bark_server_url),
+            [str(key) for key in bark_keys],
+            level=str(bark_settings.get("bark_level") or self.settings.bark_level),
+            sound=str(bark_settings.get("bark_sound") or self.settings.bark_sound),
+            group=str(bark_settings.get("bark_group") or self.settings.bark_group),
+            call=self._setting_bool(bark_settings.get("bark_call"), self.settings.bark_call),
+            volume=self._setting_int(bark_settings.get("bark_volume"), self.settings.bark_volume),
+            proxy=db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
+        )
+        return CompositeNotifier([telegram, wxpusher, bark])
 
     def _split_uids(self, raw: str) -> list[str]:
         return [uid.strip() for uid in raw.replace(";", ",").split(",") if uid.strip()]
+
+    def _setting_bool(self, raw: Any, default: bool) -> bool:
+        if raw in (None, ""):
+            return default
+        return str(raw).strip().lower() in {"1", "true", "yes", "on", "开", "开启"}
+
+    def _setting_int(self, raw: Any, default: int) -> int:
+        try:
+            return int(str(raw))
+        except (TypeError, ValueError):
+            return default

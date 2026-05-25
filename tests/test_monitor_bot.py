@@ -93,6 +93,33 @@ def test_telegram_bot_manages_wxpusher_settings(tmp_path) -> None:
     assert "UID_b" in status
 
 
+def test_telegram_bot_manages_bark_settings(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    bot = TelegramCommandBot(storage, _settings(storage.db_path))
+
+    assert bot.handle_command("/bark server https://api.day.app") == "已保存 Bark 服务地址。"
+    assert "当前 1 个" in bot.handle_command("/bark add device-key-a")
+    assert "当前 2 个" in bot.handle_command("/bark add device-key-b")
+    assert "紧急" in bot.handle_command("/bark level 紧急")
+    assert "已开启" in bot.handle_command("/bark call 开")
+    assert "minuet" in bot.handle_command("/bark sound minuet")
+    assert "8" in bot.handle_command("/bark volume 8")
+    assert "当前 1 个" in bot.handle_command("/bark del device-key-a")
+
+    settings = storage.get_bark_settings()
+    status = bot.handle_command("/bark status")
+
+    assert settings["bark_server_url"] == "https://api.day.app"
+    assert settings["bark_device_keys"] == ["device-key-b"]
+    assert settings["bark_level"] == "critical"
+    assert settings["bark_call"] == "1"
+    assert settings["bark_sound"] == "minuet"
+    assert settings["bark_volume"] == "8"
+    assert "devi...ey-b" in status
+    assert "紧急" in status
+
+
 def test_telegram_bot_manages_authorized_chats(tmp_path) -> None:
     storage = MonitorStorage(str(tmp_path / "monitor.db"))
     storage.init()
@@ -172,3 +199,4 @@ def test_telegram_bot_guided_menu_callbacks(tmp_path) -> None:
     assert "/meta @用户名 <分组> <备注名>" in text
     assert "inline_keyboard" in markup
     assert any(button["callback_data"] == "menu:groups" for row in markup["inline_keyboard"] for button in row)
+    assert any(button["callback_data"] == "menu:bark" for row in markup["inline_keyboard"] for button in row)

@@ -129,6 +129,36 @@ def test_storage_wxpusher_settings_manage_uids(tmp_path) -> None:
     assert settings["wxpusher_app_token"] == ""
 
 
+def test_storage_bark_settings_manage_devices_and_alert_options(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+
+    settings = storage.update_bark_settings(
+        bark_server_url="api.day.app/",
+        bark_device_keys=["key_a", "key_a", " key_b "],
+        bark_level="紧急",
+        bark_sound="minuet",
+        bark_group="XMonitor",
+        bark_call=True,
+        bark_volume=15,
+    )
+
+    assert settings["bark_server_url"] == "https://api.day.app"
+    assert settings["bark_device_keys"] == ["key_a", "key_b"]
+    assert settings["bark_level"] == "critical"
+    assert settings["bark_sound"] == "minuet"
+    assert settings["bark_group"] == "XMonitor"
+    assert settings["bark_call"] == "1"
+    assert settings["bark_volume"] == "10"
+
+    settings = storage.update_bark_settings(bark_add_device_key="key_c")
+    assert settings["bark_device_keys"] == ["key_a", "key_b", "key_c"]
+
+    settings = storage.update_bark_settings(bark_remove_device_key="key_b", bark_call=False)
+    assert settings["bark_device_keys"] == ["key_a", "key_c"]
+    assert settings["bark_call"] == "0"
+
+
 def test_storage_telegram_authorized_chats_manage_crud(tmp_path) -> None:
     storage = MonitorStorage(str(tmp_path / "monitor.db"))
     storage.init()
