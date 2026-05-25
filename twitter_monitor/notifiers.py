@@ -30,6 +30,15 @@ def _clip(text: str, limit: int = 900) -> str:
     return normalized[: limit - 3] + "..."
 
 
+def _clip_lines(text: str, limit: int = 1800) -> str:
+    normalized = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    normalized = "\n".join(line.rstrip() for line in normalized.splitlines())
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."
+
+
 class EventFormatter:
     _MENTION_OR_URL_RE = re.compile(r"https?://[^\s<]+|(?<![\w/])@([A-Za-z0-9_]{1,15})")
     _HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
@@ -137,6 +146,59 @@ class EventFormatter:
             ]
         )
 
+    def format_bark_markdown(self, event: dict[str, Any]) -> str:
+        event_type = event.get("event_type")
+        payload = self._payload(event)
+        target = self._target_identity_markdown(event)
+        time_text = self._markdown_escape(self._format_time_plain(str(event.get("detected_at") or "")))
+        body = self._linkify_markdown_text(str(event.get("body") or ""))
+        title = self._linkify_markdown_text(str(event.get("title") or "X monitor event"))
+        translated = self._translate(str(event.get("body") or ""))
+        url = str(event.get("url") or "")
+
+        if event_type == "tweet":
+            heading = "%s 于 %s 原创发推" % (target, time_text)
+            sections = [self._markdown_section("原文", body)]
+            sections.extend(self._tweet_profile_markdown_sections(payload))
+            translation_label = "翻译内容"
+        elif event_type == "retweet":
+            heading = "%s 于 %s 转推了新内容" % (target, time_text)
+            sections = [self._markdown_section("原文", "\n\n".join(part for part in [title, body] if part))]
+            sections.extend(self._tweet_profile_markdown_sections(payload))
+            translation_label = "翻译内容"
+        elif event_type == "reply":
+            heading = "%s 于 %s 发表了回复" % (target, time_text)
+            sections = [self._markdown_section("原文", "\n\n".join(part for part in [title, body] if part))]
+            sections.extend(self._tweet_profile_markdown_sections(payload))
+            translation_label = "翻译内容"
+        elif event_type == "following":
+            followed = self._profile_markdown_link(
+                str(payload.get("name") or event.get("title") or ""),
+                str(payload.get("screenName") or ""),
+            )
+            heading = "%s 于 %s 关注了 %s" % (target, time_text, followed)
+            sections = [self._markdown_section("原简介", body)]
+            translation_label = "翻译简介"
+        else:
+            heading = title
+            sections = [
+                self._markdown_section(
+                    "发现时间",
+                    self._markdown_escape(self._format_time(str(event.get("detected_at") or ""))),
+                )
+            ]
+            if body:
+                sections.append(self._markdown_section("内容", body))
+            translation_label = "翻译内容"
+
+        if translated:
+            sections.append(
+                self._markdown_section(translation_label, self._linkify_markdown_text(translated))
+            )
+        if url:
+            sections.append(self._markdown_section("链接", self._markdown_link(url, url)))
+        return "\n\n".join(["### %s" % heading, *(section for section in sections if section)])
+
     def format_text(self, event: dict[str, Any]) -> str:
         without_tags = re.sub(r"<[^>]+>", "", self.format_html(event))
         return html.unescape(without_tags)
@@ -151,6 +213,17 @@ class EventFormatter:
             "test": "测试通知",
         }
         return _clip("%s %s" % (self._target_identity_plain(event), labels.get(event_type, "新事件")), 64)
+
+    def bark_title(self, event: dict[str, Any]) -> str:
+        event_type = str(event.get("event_type") or "")
+        labels = {
+            "tweet": "原创发推",
+            "retweet": "转推",
+            "reply": "回复",
+            "following": "新增关注",
+            "test": "测试通知",
+        }
+        return _clip("【%s】%s" % (labels.get(event_type, "新事件"), self._target_identity_plain(event)), 96)
 
     def _payload(self, event: dict[str, Any]) -> dict[str, Any]:
         raw = event.get("payload_json") or "{}"
@@ -199,6 +272,24 @@ class EventFormatter:
         parts.append(profile)
         return "｜".join(parts)
 
+    def _target_identity_markdown(self, event: dict[str, Any]) -> str:
+        if event.get("event_type") == "test":
+            return self._markdown_escape(str(event.get("target_handle") or "monitor"))
+        group = str(event.get("target_group_name") or "").strip()
+        remark = str(event.get("target_remark_name") or "").strip()
+        parts = []
+        if group:
+            parts.append("【%s】" % self._markdown_escape(group))
+        if remark:
+            parts.append("%s ·" % self._markdown_escape(remark))
+        parts.append(
+            self._profile_markdown_link(
+                str(event.get("target_name") or ""),
+                str(event.get("target_handle") or "unknown"),
+            )
+        )
+        return " ".join(parts)
+
     def _tweet_profile_sections(self, payload: dict[str, Any]) -> list[str]:
         sections = []
         author = payload.get("author") or {}
@@ -230,10 +321,48 @@ class EventFormatter:
                 )
         return sections
 
+    def _tweet_profile_markdown_sections(self, payload: dict[str, Any]) -> list[str]:
+        sections = []
+        author = payload.get("author") or {}
+        if isinstance(author, dict) and author.get("screenName"):
+            sections.append(
+                self._markdown_section(
+                    "推文作者",
+                    self._profile_markdown_link(
+                        str(author.get("name") or ""), str(author.get("screenName") or "")
+                    ),
+                )
+            )
+        retweeted_by = str(payload.get("retweetedBy") or "")
+        if retweeted_by:
+            sections.append(self._markdown_section("转推用户", self._profile_markdown_link("", retweeted_by)))
+        in_reply_to = str(payload.get("inReplyToScreenName") or "")
+        if in_reply_to:
+            sections.append(self._markdown_section("回复对象", self._profile_markdown_link("", in_reply_to)))
+        quoted = payload.get("quotedTweet") or {}
+        if isinstance(quoted, dict):
+            quoted_author = quoted.get("author") or {}
+            if isinstance(quoted_author, dict) and quoted_author.get("screenName"):
+                sections.append(
+                    self._markdown_section(
+                        "引用用户",
+                        self._profile_markdown_link(
+                            str(quoted_author.get("name") or ""),
+                            str(quoted_author.get("screenName") or ""),
+                        ),
+                    )
+                )
+        return sections
+
     def _section(self, label: str, content: str) -> str:
         if not content:
             return ""
         return "<p><strong>%s：</strong><br>%s</p>" % (html.escape(label), content)
+
+    def _markdown_section(self, label: str, content: str) -> str:
+        if not content:
+            return ""
+        return "**%s**\n\n%s" % (self._markdown_escape(label), content)
 
     def _profile_link(self, display_name: str, handle: str) -> str:
         cleaned = self._clean_handle(handle)
@@ -244,6 +373,16 @@ class EventFormatter:
         if display and display != cleaned and display != "@%s" % cleaned:
             label = "%s（@%s）" % (display, cleaned)
         return self._html_link(self._profile_url(cleaned), label)
+
+    def _profile_markdown_link(self, display_name: str, handle: str) -> str:
+        cleaned = self._clean_handle(handle)
+        if not cleaned:
+            return self._linkify_markdown_text(display_name)
+        display = display_name.strip()
+        label = "@%s" % cleaned
+        if display and display != cleaned and display != "@%s" % cleaned:
+            label = "%s（@%s）" % (display, cleaned)
+        return self._markdown_link(self._profile_url(cleaned), label)
 
     def _profile_url(self, handle: str) -> str:
         return "https://x.com/%s" % self._clean_handle(handle)
@@ -270,6 +409,22 @@ class EventFormatter:
         parts.append(html.escape(raw[last:]))
         return "".join(parts)
 
+    def _linkify_markdown_text(self, text: str, limit: int = 900) -> str:
+        raw = _clip_lines(text, limit)
+        parts = []
+        last = 0
+        for match in self._MENTION_OR_URL_RE.finditer(raw):
+            parts.append(self._markdown_escape(raw[last:match.start()]))
+            matched = match.group(0)
+            handle = match.group(1)
+            if handle:
+                parts.append(self._profile_markdown_link("", handle))
+            else:
+                parts.append(self._markdown_link(matched, matched))
+            last = match.end()
+        parts.append(self._markdown_escape(raw[last:]))
+        return "".join(parts)
+
     def _html_link(self, url: str, label: str) -> str:
         clean_url = str(url or "").strip()
         if not clean_url:
@@ -278,6 +433,16 @@ class EventFormatter:
             html.escape(clean_url, quote=True),
             html.escape(str(label or clean_url)),
         )
+
+    def _markdown_link(self, url: str, label: str) -> str:
+        clean_url = str(url or "").strip()
+        if not clean_url:
+            return self._markdown_escape(str(label or ""))
+        safe_url = clean_url.replace(" ", "%20").replace(")", "%29")
+        return "[%s](%s)" % (self._markdown_escape(str(label or clean_url)), safe_url)
+
+    def _markdown_escape(self, text: str) -> str:
+        return re.sub(r"([\\`*_{}\[\]()#+\-.!|>])", r"\\\1", str(text or ""))
 
     def _translate(self, text: str) -> str:
         return LibreTranslateClient(proxy=self.proxy).translate_to_chinese(text)
@@ -506,8 +671,9 @@ class BarkNotifier:
             return NotificationResult(False, "bark_not_configured")
         effective_level = "critical" if self.call else self.level
         payload = {
-            "title": self.formatter.summary(event),
-            "body": _clip(self.formatter.format_text(event), 1800),
+            "title": self.formatter.bark_title(event),
+            "body": _clip(self.formatter.format_text(event), 600),
+            "markdown": _clip_lines(self.formatter.format_bark_markdown(event), 3500),
             "group": self.group,
             "level": effective_level,
             "isArchive": "1",

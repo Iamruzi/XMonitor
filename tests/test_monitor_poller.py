@@ -308,6 +308,40 @@ def test_wxpusher_notifier_sends_html_payload(monkeypatch) -> None:
     assert '<a href="https://x.com/elonmusk">Elon Musk（@elonmusk）</a>' in opener.payload["content"]
 
 
+def test_bark_markdown_formatter_links_profiles_and_sections(monkeypatch) -> None:
+    monkeypatch.setenv("MONITOR_TIMEZONE", "Asia/Shanghai")
+    monkeypatch.setattr(
+        "twitter_monitor.notifiers.LibreTranslateClient.translate_to_chinese",
+        lambda self, text: "BNB Chain 增长负责人",
+    )
+
+    formatter = EventFormatter()
+    text = formatter.format_bark_markdown(
+        {
+            "event_type": "following",
+            "target_handle": "CryptoZen911",
+            "target_name": "CryptoZen",
+            "target_group_name": "alpha猎手",
+            "target_remark_name": "wx好友流星",
+            "title": "Nina Rong (@nina_rong)",
+            "body": "Executive Director of Growth @BNBChain",
+            "url": "https://x.com/nina_rong",
+            "detected_at": "2026-05-22T14:57:15Z",
+            "payload_json": '{"name":"Nina Rong","screenName":"nina_rong"}',
+        }
+    )
+
+    assert text.startswith("### 【alpha猎手】 wx好友流星 · ")
+    assert "[CryptoZen（@CryptoZen911）](https://x.com/CryptoZen911)" in text
+    assert "于 2026\\-05\\-22 22:57:15 关注了" in text
+    assert "[Nina Rong（@nina\\_rong）](https://x.com/nina_rong)" in text
+    assert "**原简介**" in text
+    assert "[@BNBChain](https://x.com/BNBChain)" in text
+    assert "**翻译简介**" in text
+    assert "BNB Chain 增长负责人" in text
+    assert "[https://x\\.com/nina\\_rong](https://x.com/nina_rong)" in text
+
+
 def test_bark_notifier_sends_critical_payload(monkeypatch) -> None:
     monkeypatch.setattr(
         "twitter_monitor.notifiers.LibreTranslateClient.translate_to_chinese",
@@ -367,6 +401,10 @@ def test_bark_notifier_sends_critical_payload(monkeypatch) -> None:
     assert opener.url == "https://api.day.app/push"
     payload = opener.payload
     assert payload["device_keys"] == ["key-a", "key-b"]
+    assert payload["title"] == "【原创发推】alpha｜friend｜Alice（@alice）"
+    assert "### 【alpha】 friend · [Alice（@alice）](https://x.com/alice)" in payload["markdown"]
+    assert "**原文**" in payload["markdown"]
+    assert "[https://x\\.com/alice/status/1](https://x.com/alice/status/1)" in payload["markdown"]
     assert payload["level"] == "critical"
     assert payload["call"] == "1"
     assert payload["sound"] == "minuet"
