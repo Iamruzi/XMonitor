@@ -24,7 +24,7 @@ $env:TWITTER_AUTH_TOKEN="你的 auth_token"
 $env:TWITTER_CT0="你的 ct0"
 $env:TWITTER_PROXY="http://127.0.0.1:7897"
 
-# 可选：修改控制台管理密码；默认是 Vip.123456
+# 必填：控制台管理密码，只从环境变量读取
 $env:MONITOR_ADMIN_TOKEN="change-me"
 
 uv sync
@@ -37,7 +37,7 @@ uv run twitter-monitor
 http://127.0.0.1:8000
 ```
 
-打开页面后会先进入登录页。默认管理密码是 `Vip.123456`。部署到公网后建议设置自己的 `MONITOR_ADMIN_TOKEN`。
+打开页面后会先进入登录页。管理密码只从 `MONITOR_ADMIN_TOKEN` 读取；未配置时后台会锁定受保护 API。
 
 ## 管理密码有什么用
 
@@ -45,8 +45,7 @@ http://127.0.0.1:8000
 保存 Telegram/WxPusher/Bark 配置、立即检查和查看受保护的数据列表。前端登录后会把密码保存在浏览器本地，
 后续请求会通过 `X-Admin-Token` 请求头带给后端。
 
-默认密码是 `Vip.123456`，只是为了本地启动后可以直接使用。只要准备放到公网、免费托管平台或共享网络，
-都建议通过环境变量改掉：
+本项目不再内置默认管理密码。启动前必须通过环境变量配置：
 
 ```powershell
 $env:MONITOR_ADMIN_TOKEN="换成你自己的强密码"
@@ -86,8 +85,12 @@ WxPusher 的标题摘要会包含分组、备注名和用户名，手机通知�
 页面会根据简介里的协议、链、DeFi、AI、钱包、官方、基金会等线索标记疑似项目，也会把明显个人/KOL 线索降权。
 每个项目卡会展开共同关注证据，标出关注来源的分组、备注名、用户名和首次发现关注时间，并给出早期分、粉丝阶段、
 跨组共识、近期集中关注等信号，帮助优先看低粉但被多个观察对象同时关注的项目。
+当同一个项目被第二个、第三个监控用户继续关注时，项目卡会显示 `🔥` 升温线，按时间列出“谁在什么时候也关注了”。
 这是基于已采集数据的启发式识别；没有资料的历史关注、纯用户 ID 和明显个人账号不会进入项目雷达，
 等下一轮关注检查再次抓到资料后会自动重新判断。
+
+WxPusher 和 Bark 可以在设置里开启“只推热点项目”，并设置共同关注阈值。开启后，这两个渠道只推送达到阈值的项目升温事件；
+Telegram 默认仍保留全量事件，方便回溯。
 
 ## 批量导入和导出
 
@@ -232,7 +235,7 @@ $env:MONITOR_TG_COMMANDS="false"
 | `BARK_CALL` | 否 | `false` | 是否启用 Bark 持续响铃 |
 | `BARK_VOLUME` | 否 | `5` | Bark 紧急音量，0-10 |
 | `MONITOR_TG_COMMANDS` | 否 | `true` | 是否启用 Telegram Bot 管理命令 |
-| `MONITOR_ADMIN_TOKEN` | 否 | `Vip.123456` | 管理控制台和受保护 API 的密码 |
+| `MONITOR_ADMIN_TOKEN` | 是 | | 管理控制台和受保护 API 的密码 |
 | `MONITOR_DB_PATH` | 否 | `twitter-monitor.db` | SQLite 数据库路径 |
 | `MONITOR_POLL_INTERVAL_MIN` | 否 | `180` | 后台检查最短等待，单位秒 |
 | `MONITOR_POLL_INTERVAL_MAX` | 否 | `300` | 后台检查最长等待，单位秒 |
@@ -284,13 +287,13 @@ MONITOR_BACKGROUND_WORKER=false
 POST /api/poll/run
 ```
 
-如果设置了 `MONITOR_ADMIN_TOKEN`，请求头需要带：
+请求头需要带 `MONITOR_ADMIN_TOKEN` 对应的管理密码：
 
 ```text
 X-Admin-Token: change-me
 ```
 
-这里的值要换成你的管理密码；如果还没改过，就是默认的 `Vip.123456`。
+这里的值要换成你的管理密码。
 
 SQLite 适合个人监控。部署时要把 `MONITOR_DB_PATH` 放到持久化磁盘路径，否则重启或重新部署后基线和事件会丢失。
 

@@ -97,6 +97,8 @@ class NotificationSettingsUpdate(BaseModel):
     wxpusher_add_uid: str | None = None
     wxpusher_remove_uid: str | None = None
     wxpusher_enabled: bool | None = None
+    wxpusher_hot_filter_enabled: bool | None = None
+    wxpusher_hot_filter_min_common: int | None = None
     clear_wxpusher_app_token: bool = False
     bark_server_url: str | None = None
     bark_device_keys: list[str] | None = None
@@ -108,6 +110,8 @@ class NotificationSettingsUpdate(BaseModel):
     bark_call: bool | None = None
     bark_volume: int | None = None
     bark_enabled: bool | None = None
+    bark_hot_filter_enabled: bool | None = None
+    bark_hot_filter_min_common: int | None = None
 
 
 class NotificationTestRequest(BaseModel):
@@ -138,8 +142,8 @@ class PollSettingsUpdate(BaseModel):
 
 
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
-    if not settings.admin_required:
-        return
+    if not settings.admin_token:
+        raise HTTPException(status_code=503, detail="服务端未配置 MONITOR_ADMIN_TOKEN，管理后台已锁定")
     if not x_admin_token or not hmac.compare_digest(x_admin_token, settings.admin_token):
         raise HTTPException(status_code=401, detail="请输入正确的管理密钥")
 
@@ -183,6 +187,8 @@ def _notification_config() -> dict[str, Any]:
     wx_token = wx_settings.get("wxpusher_app_token") or settings.wxpusher_app_token
     wx_uids = wx_settings.get("wxpusher_uids") or _split_list(settings.wxpusher_uids)
     wx_enabled = _setting_bool(wx_settings.get("wxpusher_enabled"), True)
+    wx_hot_filter_enabled = _setting_bool(wx_settings.get("wxpusher_hot_filter_enabled"), False)
+    wx_hot_filter_min_common = max(_setting_int(wx_settings.get("wxpusher_hot_filter_min_common"), 2), 2)
     bark_settings = storage.get_bark_settings()
     bark_server_url = bark_settings.get("bark_server_url") or settings.bark_server_url
     bark_device_keys = bark_settings.get("bark_device_keys") or _split_list(settings.bark_device_keys)
@@ -192,6 +198,8 @@ def _notification_config() -> dict[str, Any]:
     bark_call = _setting_bool(bark_settings.get("bark_call"), settings.bark_call)
     bark_volume = min(max(_setting_int(bark_settings.get("bark_volume"), settings.bark_volume), 0), 10)
     bark_enabled = _setting_bool(bark_settings.get("bark_enabled"), True)
+    bark_hot_filter_enabled = _setting_bool(bark_settings.get("bark_hot_filter_enabled"), False)
+    bark_hot_filter_min_common = max(_setting_int(bark_settings.get("bark_hot_filter_min_common"), 2), 2)
     telegram_active = bool(token and telegram_chat_ids)
     wx_active = bool(wx_enabled and wx_token and wx_uids)
     bark_active = bool(bark_enabled and bark_server_url and bark_device_keys)
@@ -214,6 +222,8 @@ def _notification_config() -> dict[str, Any]:
         "wxpusherAppTokenSaved": bool(wx_token),
         "wxpusherAppTokenPreview": _mask_secret(str(wx_token or "")),
         "wxpusherUids": wx_uids,
+        "wxpusherHotFilterEnabled": wx_hot_filter_enabled,
+        "wxpusherHotFilterMinCommon": wx_hot_filter_min_common,
         "barkConfigured": bool(bark_server_url and bark_device_keys),
         "barkEnabled": bark_enabled,
         "barkActive": bark_active,
@@ -226,6 +236,8 @@ def _notification_config() -> dict[str, Any]:
         "barkGroup": bark_group,
         "barkCall": bark_call,
         "barkVolume": bark_volume,
+        "barkHotFilterEnabled": bark_hot_filter_enabled,
+        "barkHotFilterMinCommon": bark_hot_filter_min_common,
         "source": source,
     }
 
@@ -328,6 +340,7 @@ def config() -> dict[str, Any]:
         next_poll_remaining = max(int((next_poll_at - datetime.now(timezone.utc)).total_seconds()), 0)
     return {
         "adminRequired": settings.admin_required,
+        "adminConfigured": settings.admin_configured,
         "notificationConfigured": notification["notificationConfigured"],
         "telegramConfigured": notification["telegramConfigured"],
         "wxpusherConfigured": notification["wxpusherConfigured"],
@@ -549,6 +562,8 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
         wxpusher_add_uid=payload.wxpusher_add_uid,
         wxpusher_remove_uid=payload.wxpusher_remove_uid,
         wxpusher_enabled=payload.wxpusher_enabled,
+        wxpusher_hot_filter_enabled=payload.wxpusher_hot_filter_enabled,
+        wxpusher_hot_filter_min_common=payload.wxpusher_hot_filter_min_common,
         clear_wxpusher_app_token=payload.clear_wxpusher_app_token,
     )
     submitted_bark_keys = payload.bark_device_keys
@@ -566,6 +581,8 @@ def update_notification_settings(payload: NotificationSettingsUpdate) -> dict[st
         bark_call=payload.bark_call,
         bark_volume=payload.bark_volume,
         bark_enabled=payload.bark_enabled,
+        bark_hot_filter_enabled=payload.bark_hot_filter_enabled,
+        bark_hot_filter_min_common=payload.bark_hot_filter_min_common,
     )
     return {"data": _notification_config()}
 

@@ -126,6 +126,35 @@ def test_second_poll_creates_events_for_new_items(tmp_path) -> None:
     assert len(storage.list_events()) == 2
 
 
+def test_following_event_payload_includes_hot_project_context(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    alice = storage.add_target("alice", monitor_tweets=False)
+    bob = storage.add_target("bob", monitor_tweets=False)
+    project = UserProfile(
+        id="project-1",
+        name="Bound Exchange",
+        screen_name="Bound_Exchange",
+        bio="Official exchange protocol.",
+        followers_count=12000,
+        url="https://bound.exchange",
+    )
+    storage.upsert_followed_users([project])
+    storage.add_seen_following(alice["id"], ["project-1"])
+    storage.set_initialized(bob["id"], following=True)
+    client = FakeClient()
+    client.following = [project]
+    poller = FakePoller(storage, _settings(storage.db_path), FakeNotifier(), client)
+
+    result = poller.poll_target(storage.get_target(bob["id"]))  # type: ignore[arg-type]
+
+    assert result["newFollowing"] == 1
+    event = storage.list_events()[0]
+    payload = json.loads(event["payload_json"])
+    assert payload["hotProject"]["commonCount"] == 2
+    assert payload["hotProject"]["trendEvents"][1]["marker"] == "🔥"
+
+
 def test_poller_classifies_replies_and_retweets(tmp_path) -> None:
     storage = MonitorStorage(str(tmp_path / "monitor.db"))
     storage.init()
@@ -326,6 +355,28 @@ def test_wxpusher_notifier_sends_html_payload(monkeypatch) -> None:
     assert '<a href="https://x.com/elonmusk">Elon Musk（@elonmusk）</a>' in opener.payload["content"]
 
 
+def test_wxpusher_hot_filter_skips_non_hot_events() -> None:
+    notifier = WxPusherNotifier(
+        "app-token",
+        ["UID_a"],
+        hot_filter_enabled=True,
+        hot_filter_min_common=2,
+    )
+
+    result = notifier.send_event(
+        {
+            "event_type": "following",
+            "target_handle": "alice",
+            "title": "Bob",
+            "payload_json": "{}",
+        }
+    )
+
+    assert result.sent is False
+    assert result.skipped is True
+    assert result.error is None
+
+
 def test_bark_markdown_formatter_links_profiles_and_sections(monkeypatch) -> None:
     monkeypatch.setenv("MONITOR_TIMEZONE", "Asia/Shanghai")
     monkeypatch.setattr(
@@ -429,6 +480,28 @@ def test_bark_notifier_sends_critical_payload(monkeypatch) -> None:
     assert payload["group"] == "XMonitor"
     assert payload["volume"] == "8"
     assert payload["url"] == "https://x.com/alice/status/1"
+
+
+def test_bark_hot_filter_skips_below_threshold() -> None:
+    notifier = BarkNotifier(
+        "https://api.day.app",
+        ["device-key"],
+        hot_filter_enabled=True,
+        hot_filter_min_common=3,
+    )
+
+    result = notifier.send_event(
+        {
+            "event_type": "following",
+            "target_handle": "alice",
+            "title": "Bound Exchange",
+            "payload_json": json.dumps({"hotProject": {"commonCount": 2}}),
+        }
+    )
+
+    assert result.sent is False
+    assert result.skipped is True
+    assert result.error is None
 
 
 def test_telegram_notifier_sends_to_multiple_chats(monkeypatch) -> None:

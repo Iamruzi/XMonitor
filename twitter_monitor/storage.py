@@ -1053,6 +1053,7 @@ class MonitorStorage:
             first_seen_at=first_seen_at,
             last_seen_at=last_seen_at,
         )
+        trend_events = self._project_trend_events(followed_by)
         return {
             "userId": user_id,
             "handle": handle,
@@ -1074,6 +1075,9 @@ class MonitorStorage:
             "commonCount": len(followed_by),
             "followedBy": followed_by,
             "groupNames": sorted({str(item.get("groupName") or "") for item in followed_by if item.get("groupName")}),
+            "isHot": bool(signal.get("isProject") and len(followed_by) >= 2),
+            "trendEvents": trend_events,
+            "latestTrendText": trend_events[-1]["text"] if trend_events else "",
             **discovery,
             **signal,
         }
@@ -1193,6 +1197,66 @@ class MonitorStorage:
             "lastSeenAt": last_seen_at,
         }
 
+    def _project_trend_events(self, followed_by: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ordered = sorted(
+            followed_by,
+            key=lambda item: (
+                self._parse_timestamp(str(item.get("firstSeenAt") or "")) or datetime.min.replace(tzinfo=timezone.utc),
+                str(item.get("handle") or ""),
+            ),
+        )
+        events = []
+        for index, target in enumerate(ordered, start=1):
+            seen_at = str(target.get("firstSeenAt") or "")
+            label = self._target_brief_label(target)
+            verb = "关注了" if index == 1 else "也关注了"
+            marker = "🔥" if index >= 2 else ""
+            time_text = self._display_timestamp(seen_at)
+            parts = [part for part in [marker, time_text, label, verb] if part]
+            events.append(
+                {
+                    "sequence": index,
+                    "firstSeenAt": seen_at,
+                    "marker": marker,
+                    "label": label,
+                    "target": target,
+                    "text": " ".join(parts),
+                }
+            )
+        return events
+
+    def followed_account_context(self, user_id: str) -> dict[str, Any] | None:
+        user_id = str(user_id or "").strip()
+        if not user_id:
+            return None
+        with self._connect() as conn:
+            relation_rows = conn.execute(
+                """
+                SELECT seen_following.user_id,
+                       seen_following.first_seen_at,
+                       targets.id AS target_id,
+                       targets.handle AS target_handle,
+                       targets.display_name AS target_display_name,
+                       targets.group_name AS target_group_name,
+                       targets.remark_name AS target_remark_name,
+                       targets.enabled AS target_enabled
+                FROM seen_following
+                JOIN targets ON targets.id = seen_following.target_id
+                WHERE seen_following.user_id = ?
+                ORDER BY seen_following.first_seen_at ASC
+                """,
+                (user_id,),
+            ).fetchall()
+            profile_row = conn.execute(
+                "SELECT * FROM followed_users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if not relation_rows:
+            return None
+        profiles = {user_id: dict(profile_row)} if profile_row is not None else {}
+        cards = self._account_cards_from_relations(relation_rows, profiles)
+        return cards[0] if cards else None
+
     def _project_signal(
         self,
         *,
@@ -1282,6 +1346,23 @@ class MonitorStorage:
         if url:
             return "已采集主页：%s" % url
         return "还没有采集到简介，等待下一轮关注检查补全。"
+
+    def _target_brief_label(self, target: dict[str, Any]) -> str:
+        group_name = str(target.get("groupName") or "未分组")
+        remark_name = str(target.get("remarkName") or "")
+        handle = str(target.get("handle") or "unknown")
+        display_name = str(target.get("displayName") or handle)
+        parts = [group_name]
+        if remark_name:
+            parts.append(remark_name)
+        parts.append("%s（@%s）" % (display_name, handle))
+        return "｜".join(parts)
+
+    def _display_timestamp(self, value: str) -> str:
+        parsed = self._parse_timestamp(value)
+        if not parsed:
+            return str(value or "")
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
     def _parse_timestamp(self, value: str) -> datetime | None:
         value = str(value or "").strip()
@@ -1490,6 +1571,8 @@ class MonitorStorage:
             "wxpusher_app_token": self.get_app_setting("wxpusher_app_token"),
             "wxpusher_uids": self._json_list_setting("wxpusher_uids"),
             "wxpusher_enabled": self.get_app_setting("wxpusher_enabled", "1"),
+            "wxpusher_hot_filter_enabled": self.get_app_setting("wxpusher_hot_filter_enabled", "0"),
+            "wxpusher_hot_filter_min_common": self.get_app_setting("wxpusher_hot_filter_min_common", "2"),
         }
 
     def update_wxpusher_settings(
@@ -1500,6 +1583,8 @@ class MonitorStorage:
         wxpusher_add_uid: str | None = None,
         wxpusher_remove_uid: str | None = None,
         wxpusher_enabled: bool | None = None,
+        wxpusher_hot_filter_enabled: bool | None = None,
+        wxpusher_hot_filter_min_common: int | None = None,
         clear_wxpusher_app_token: bool = False,
     ) -> dict[str, Any]:
         if clear_wxpusher_app_token:
@@ -1508,6 +1593,10 @@ class MonitorStorage:
             self.set_app_setting("wxpusher_app_token", wxpusher_app_token.strip())
         if wxpusher_enabled is not None:
             self.set_app_setting("wxpusher_enabled", "1" if wxpusher_enabled else "0")
+        if wxpusher_hot_filter_enabled is not None:
+            self.set_app_setting("wxpusher_hot_filter_enabled", "1" if wxpusher_hot_filter_enabled else "0")
+        if wxpusher_hot_filter_min_common is not None:
+            self.set_app_setting("wxpusher_hot_filter_min_common", str(max(int(wxpusher_hot_filter_min_common), 2)))
 
         uids = self._json_list_setting("wxpusher_uids")
         if wxpusher_uids is not None:
@@ -1532,6 +1621,8 @@ class MonitorStorage:
             "bark_call": self.get_app_setting("bark_call"),
             "bark_volume": self.get_app_setting("bark_volume"),
             "bark_enabled": self.get_app_setting("bark_enabled", "1"),
+            "bark_hot_filter_enabled": self.get_app_setting("bark_hot_filter_enabled", "0"),
+            "bark_hot_filter_min_common": self.get_app_setting("bark_hot_filter_min_common", "2"),
         }
 
     def update_bark_settings(
@@ -1547,6 +1638,8 @@ class MonitorStorage:
         bark_call: bool | None = None,
         bark_volume: int | None = None,
         bark_enabled: bool | None = None,
+        bark_hot_filter_enabled: bool | None = None,
+        bark_hot_filter_min_common: int | None = None,
     ) -> dict[str, Any]:
         if bark_server_url is not None:
             self.set_app_setting("bark_server_url", self._clean_url(bark_server_url))
@@ -1562,6 +1655,10 @@ class MonitorStorage:
             self.set_app_setting("bark_volume", str(min(max(int(bark_volume), 0), 10)))
         if bark_enabled is not None:
             self.set_app_setting("bark_enabled", "1" if bark_enabled else "0")
+        if bark_hot_filter_enabled is not None:
+            self.set_app_setting("bark_hot_filter_enabled", "1" if bark_hot_filter_enabled else "0")
+        if bark_hot_filter_min_common is not None:
+            self.set_app_setting("bark_hot_filter_min_common", str(max(int(bark_hot_filter_min_common), 2)))
 
         device_keys = self._json_list_setting("bark_device_keys")
         if bark_device_keys is not None:

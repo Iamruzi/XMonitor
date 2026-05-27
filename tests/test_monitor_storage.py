@@ -116,11 +116,15 @@ def test_storage_wxpusher_settings_manage_uids(tmp_path) -> None:
         wxpusher_app_token="app-token",
         wxpusher_uids=["UID_a", "UID_a", " UID_b "],
         wxpusher_enabled=False,
+        wxpusher_hot_filter_enabled=True,
+        wxpusher_hot_filter_min_common=3,
     )
 
     assert settings["wxpusher_app_token"] == "app-token"
     assert settings["wxpusher_uids"] == ["UID_a", "UID_b"]
     assert settings["wxpusher_enabled"] == "0"
+    assert settings["wxpusher_hot_filter_enabled"] == "1"
+    assert settings["wxpusher_hot_filter_min_common"] == "3"
 
     settings = storage.update_wxpusher_settings(wxpusher_add_uid="UID_c")
     assert settings["wxpusher_uids"] == ["UID_a", "UID_b", "UID_c"]
@@ -145,6 +149,8 @@ def test_storage_bark_settings_manage_devices_and_alert_options(tmp_path) -> Non
         bark_call=True,
         bark_volume=15,
         bark_enabled=False,
+        bark_hot_filter_enabled=True,
+        bark_hot_filter_min_common=4,
     )
 
     assert settings["bark_server_url"] == "https://api.day.app"
@@ -155,6 +161,8 @@ def test_storage_bark_settings_manage_devices_and_alert_options(tmp_path) -> Non
     assert settings["bark_call"] == "1"
     assert settings["bark_volume"] == "10"
     assert settings["bark_enabled"] == "0"
+    assert settings["bark_hot_filter_enabled"] == "1"
+    assert settings["bark_hot_filter_min_common"] == "4"
 
     settings = storage.update_bark_settings(bark_add_device_key="key_c")
     assert settings["bark_device_keys"] == ["key_a", "key_b", "key_c"]
@@ -244,6 +252,10 @@ def test_storage_builds_following_insights_from_shared_accounts(tmp_path) -> Non
     assert insights["projects"][0]["isProject"] is True
     assert insights["projects"][0]["earlyScore"] > 0
     assert "discoverySignals" in insights["projects"][0]
+    assert insights["projects"][0]["isHot"] is True
+    assert len(insights["projects"][0]["trendEvents"]) == 3
+    assert insights["projects"][0]["trendEvents"][1]["marker"] == "🔥"
+    assert "也关注了" in insights["projects"][0]["trendEvents"][1]["text"]
     assert {target["handle"] for target in insights["projects"][0]["followedBy"]} == {
         "alice",
         "bob",
@@ -262,6 +274,11 @@ def test_storage_builds_following_insights_from_shared_accounts(tmp_path) -> Non
     assert alpha_only["summary"]["sharedAccounts"] == 2
     assert alpha_only["summary"]["projectAccounts"] == 1
     assert alpha_only["projects"][0]["commonCount"] == 2
+
+    context = storage.followed_account_context("project-1")
+    assert context is not None
+    assert context["handle"] == "monad_xyz"
+    assert context["commonCount"] == 3
 
 
 def test_storage_manages_poll_settings(tmp_path) -> None:

@@ -431,7 +431,7 @@ function evidenceRows(followedBy) {
         <span class="evidence-remark">备注 ${escapeHtml(remark)}</span>
         <strong>${escapeHtml(display)}</strong>
         <a href="https://x.com/${escapeHtml(handle)}" target="_blank" rel="noreferrer">@${escapeHtml(handle)}</a>
-        <time>关注 ${escapeHtml(fmtCompact(target.firstSeenAt))}</time>
+        <time>关注 ${escapeHtml(fmt(target.firstSeenAt))}</time>
       </div>
     `;
   }).join("");
@@ -441,6 +441,16 @@ function signalTags(project) {
   return (project.discoverySignals || []).slice(0, 5).map((signal) => (
     `<span class="project-tag signal">${escapeHtml(signal)}</span>`
   )).join("");
+}
+
+function trendRows(project) {
+  const events = project.trendEvents || [];
+  if (!events.length) return "";
+  return `
+    <div class="trend-list">
+      ${events.map((event) => `<div class="trend-row ${event.sequence >= 2 ? "hot" : ""}">${escapeHtml(event.text || "")}</div>`).join("")}
+    </div>
+  `;
 }
 
 function projectEvidenceText(project) {
@@ -620,10 +630,10 @@ function projectCard(project) {
   card.innerHTML = `
     <div class="project-card-head">
       <div>
-        <strong>${escapeHtml(project.name || project.handle)}</strong>
+        <strong>${project.isHot ? "🔥 " : ""}${escapeHtml(project.name || project.handle)}</strong>
         <a href="${profileUrl}" target="_blank" rel="noreferrer">@${escapeHtml(project.handle)}</a>
       </div>
-      <span class="common-badge">共同 ${Number(project.commonCount || 0)} 人</span>
+      <span class="common-badge ${project.isHot ? "hot" : ""}">${project.isHot ? "🔥 " : ""}共同 ${Number(project.commonCount || 0)} 人</span>
     </div>
     <div class="project-tags">
       <span class="project-tag ${project.isProject ? "hot" : ""}">${escapeHtml(project.category || "账号")}</span>
@@ -636,6 +646,7 @@ function projectCard(project) {
     </div>
     <p>${escapeHtml(project.summary || "")}</p>
     <div class="project-reason">${escapeHtml(project.reason || "")}</div>
+    ${trendRows(project)}
     <div class="evidence-list">${evidenceRows(followedBy)}</div>
     ${project.url ? `<a class="project-url" href="${escapeHtml(project.url)}" target="_blank" rel="noreferrer">${escapeHtml(project.url)}</a>` : ""}
   `;
@@ -780,6 +791,8 @@ function renderSettings(notification) {
     ? `已保存：${notification.wxpusherAppTokenPreview}`
     : "";
   $("wxpusherEnabled").checked = notification.wxpusherEnabled !== false;
+  $("wxpusherHotFilterEnabled").checked = Boolean(notification.wxpusherHotFilterEnabled);
+  $("wxpusherHotFilterMinCommon").value = Number(notification.wxpusherHotFilterMinCommon || 2);
   $("barkEnabled").checked = notification.barkEnabled !== false;
   $("barkServerUrl").value = notification.barkServerUrl || "https://api.day.app";
   $("barkGroup").value = notification.barkGroup || "XMonitor";
@@ -787,6 +800,8 @@ function renderSettings(notification) {
   $("barkSound").value = notification.barkSound || "";
   $("barkCall").checked = Boolean(notification.barkCall);
   $("barkVolume").value = Number(notification.barkVolume ?? 5);
+  $("barkHotFilterEnabled").checked = Boolean(notification.barkHotFilterEnabled);
+  $("barkHotFilterMinCommon").value = Number(notification.barkHotFilterMinCommon || 2);
 
   const telegramList = $("telegramRecipients");
   telegramList.innerHTML = "";
@@ -1119,9 +1134,13 @@ $("notificationForm").addEventListener("submit", async (event) => {
         telegram_authorized_chats: telegram.authorized,
         telegram_proxy: $("telegramProxy").value.trim(),
         wxpusher_enabled: $("wxpusherEnabled").checked,
+        wxpusher_hot_filter_enabled: $("wxpusherHotFilterEnabled").checked,
+        wxpusher_hot_filter_min_common: Number($("wxpusherHotFilterMinCommon").value || 2),
         wxpusher_app_token: $("wxpusherToken").value.trim() || null,
         wxpusher_uids: collectWxpusherUids(),
         bark_enabled: $("barkEnabled").checked,
+        bark_hot_filter_enabled: $("barkHotFilterEnabled").checked,
+        bark_hot_filter_min_common: Number($("barkHotFilterMinCommon").value || 2),
         bark_server_url: $("barkServerUrl").value.trim(),
         bark_device_keys: collectBarkDeviceKeys(),
         bark_level: $("barkLevel").value,

@@ -18,6 +18,7 @@ twitter-monitor
 - Bark iOS 通知，支持普通、时效、紧急、持续响铃和自定义铃声
 - 外文正文和简介自动尝试翻译成中文
 - 前端可配置 Telegram Bot Token、接收聊天、WxPusher AppToken、UID、Bark 设备码、轮询间隔
+- 项目雷达展示共同关注证据、升温线和早期项目信号，WxPusher/Bark 可只推热点项目
 - 支持批量导入和导出监控用户
 - 支持后台自动轮询、随机抖动和失败退避
 - 支持 systemd 常驻部署和 Tailscale 内网访问
@@ -38,7 +39,7 @@ $env:TWITTER_CT0="你的 ct0"
 # 可选：本地 Clash 或其他代理
 $env:TWITTER_PROXY="http://127.0.0.1:7890"
 
-# 可选：修改管理密码，默认是 Vip.123456
+# 必填：管理密码，只从环境变量读取
 $env:MONITOR_ADMIN_TOKEN="换成你自己的密码"
 
 uv sync
@@ -51,11 +52,7 @@ uv run twitter-monitor
 http://127.0.0.1:8000/
 ```
 
-默认管理密码：
-
-```text
-Vip.123456
-```
+登录页使用 `MONITOR_ADMIN_TOKEN` 作为管理密码；未配置时后台会锁定受保护 API。
 
 ## 服务器部署
 
@@ -82,7 +79,7 @@ MONITOR_POLL_INTERVAL_MIN=180
 MONITOR_POLL_INTERVAL_MAX=300
 MONITOR_POLL_BACKOFF_MAX=1800
 MONITOR_TG_COMMANDS=true
-MONITOR_ADMIN_TOKEN=Vip.123456
+MONITOR_ADMIN_TOKEN=换成强密码
 TWITTER_AUTH_TOKEN=你的 auth_token
 TWITTER_CT0=你的 ct0
 ```
@@ -327,7 +324,7 @@ SkyAAmen,项目方,重点观察
 | `MONITOR_HOST` | 否 | `0.0.0.0` | 服务监听地址 |
 | `PORT` | 否 | `8000` | 服务端口 |
 | `MONITOR_DB_PATH` | 否 | `twitter-monitor.db` | SQLite 数据库路径 |
-| `MONITOR_ADMIN_TOKEN` | 否 | `Vip.123456` | Web 管理密码 |
+| `MONITOR_ADMIN_TOKEN` | 是 | | Web 管理密码 |
 | `MONITOR_BACKGROUND_WORKER` | 否 | `true` | 是否启用后台轮询 |
 | `MONITOR_POLL_INTERVAL_MIN` | 否 | `180` | 最短轮询等待，秒 |
 | `MONITOR_POLL_INTERVAL_MAX` | 否 | `300` | 最长轮询等待，秒 |
@@ -348,7 +345,7 @@ SkyAAmen,项目方,重点观察
 - X Cookie、Telegram Token、WxPusher Token、Bark 设备码不要提交到 GitHub
 - `.env`、`*.db`、`*.db-*` 已在 `.gitignore` 中排除
 - SQLite 数据库适合个人监控，服务器部署时要放到持久化目录
-- Web 管理密码默认是 `Vip.123456`，长期运行建议改成自己的强密码
+- Web 管理密码必须通过 `MONITOR_ADMIN_TOKEN` 配置，不要提交到 GitHub
 - 只建议把服务绑定到 Tailscale IP 或内网地址
 
 ## 开发检查

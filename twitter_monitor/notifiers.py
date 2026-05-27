@@ -21,6 +21,7 @@ from .translator import LibreTranslateClient
 class NotificationResult:
     sent: bool
     error: str | None = None
+    skipped: bool = False
 
 
 def _clip(text: str, limit: int = 900) -> str:
@@ -37,6 +38,26 @@ def _clip_lines(text: str, limit: int = 1800) -> str:
     if len(normalized) <= limit:
         return normalized
     return normalized[: limit - 3].rstrip() + "..."
+
+
+def _event_hot_common_count(event: dict[str, Any]) -> int:
+    raw = event.get("payload_json") or "{}"
+    if isinstance(raw, dict):
+        payload = raw
+    else:
+        try:
+            payload = json.loads(str(raw))
+        except (TypeError, ValueError):
+            payload = {}
+    if not isinstance(payload, dict):
+        return 0
+    hot_project = payload.get("hotProject")
+    if not isinstance(hot_project, dict):
+        return 0
+    try:
+        return int(hot_project.get("commonCount") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 class EventFormatter:
@@ -80,12 +101,14 @@ class EventFormatter:
             ]
         elif event_type == "following":
             followed = self._profile_link(str(payload.get("name") or event.get("title") or ""), str(payload.get("screenName") or ""))
+            prefix = "🔥 " if self._hot_project(payload) else ""
             lines = [
-                "<b>%s 于 %s 关注了 %s</b>" % (target, time_text, followed),
+                "<b>%s%s 于 %s 关注了 %s</b>" % (prefix, target, time_text, followed),
                 "",
                 "原简介：",
                 body,
             ]
+            lines.extend(self._hot_project_html_lines(payload))
         else:
             lines = [
                 "<b>%s</b>" % title,
@@ -125,8 +148,10 @@ class EventFormatter:
                 str(payload.get("name") or event.get("title") or ""),
                 str(payload.get("screenName") or ""),
             )
-            heading = "%s 于 %s 关注了 %s" % (target, time_text, followed)
+            prefix = "🔥 " if self._hot_project(payload) else ""
+            heading = "%s%s 于 %s 关注了 %s" % (prefix, target, time_text, followed)
             sections = [self._section("原简介", body)]
+            sections.extend(self._hot_project_html_sections(payload))
         else:
             heading = title
             sections = [self._section("发现时间", html.escape(self._format_time(str(event.get("detected_at") or ""))))]
@@ -176,8 +201,10 @@ class EventFormatter:
                 str(payload.get("name") or event.get("title") or ""),
                 str(payload.get("screenName") or ""),
             )
-            heading = "%s 于 %s 关注了 %s" % (target, time_text, followed)
+            prefix = "🔥 " if self._hot_project(payload) else ""
+            heading = "%s%s 于 %s 关注了 %s" % (prefix, target, time_text, followed)
             sections = [self._markdown_section("原简介", body)]
+            sections.extend(self._hot_project_markdown_sections(payload))
             translation_label = "翻译简介"
         else:
             heading = title
@@ -212,7 +239,8 @@ class EventFormatter:
             "following": "新增关注",
             "test": "测试通知",
         }
-        return _clip("%s %s" % (self._target_identity_plain(event), labels.get(event_type, "新事件")), 64)
+        hot_prefix = "🔥 热点项目 " if self._hot_project(self._payload(event)) else ""
+        return _clip("%s%s %s" % (hot_prefix, self._target_identity_plain(event), labels.get(event_type, "新事件")), 64)
 
     def bark_title(self, event: dict[str, Any]) -> str:
         event_type = str(event.get("event_type") or "")
@@ -223,7 +251,8 @@ class EventFormatter:
             "following": "新增关注",
             "test": "测试通知",
         }
-        return _clip("【%s】%s" % (labels.get(event_type, "新事件"), self._target_identity_plain(event)), 96)
+        hot_prefix = "🔥" if self._hot_project(self._payload(event)) else ""
+        return _clip("【%s%s】%s" % (hot_prefix, labels.get(event_type, "新事件"), self._target_identity_plain(event)), 96)
 
     def _payload(self, event: dict[str, Any]) -> dict[str, Any]:
         raw = event.get("payload_json") or "{}"
@@ -353,6 +382,75 @@ class EventFormatter:
                     )
                 )
         return sections
+
+    def _hot_project(self, payload: dict[str, Any]) -> dict[str, Any]:
+        hot_project = payload.get("hotProject")
+        return hot_project if isinstance(hot_project, dict) else {}
+
+    def _hot_project_html_lines(self, payload: dict[str, Any]) -> list[str]:
+        hot_project = self._hot_project(payload)
+        if not hot_project:
+            return []
+        trend = self._hot_project_trend_text(hot_project, html_mode=True)
+        lines = [
+            "",
+            "<b>🔥 热点项目升温</b>",
+            "共同关注：%s 人；早期分：%s；阶段：%s" % (
+                html.escape(str(hot_project.get("commonCount") or 0)),
+                html.escape(str(hot_project.get("earlyScore") or 0)),
+                html.escape(str(hot_project.get("followerStage") or "未分层")),
+            ),
+        ]
+        if trend:
+            lines.append("升温线：%s" % trend)
+        return lines
+
+    def _hot_project_html_sections(self, payload: dict[str, Any]) -> list[str]:
+        hot_project = self._hot_project(payload)
+        if not hot_project:
+            return []
+        trend = self._hot_project_trend_text(hot_project, html_mode=True)
+        facts = "共同关注 %s 人<br>早期分 %s<br>阶段 %s" % (
+            html.escape(str(hot_project.get("commonCount") or 0)),
+            html.escape(str(hot_project.get("earlyScore") or 0)),
+            html.escape(str(hot_project.get("followerStage") or "未分层")),
+        )
+        sections = [self._section("🔥 热点项目", facts)]
+        if trend:
+            sections.append(self._section("升温线", trend))
+        return sections
+
+    def _hot_project_markdown_sections(self, payload: dict[str, Any]) -> list[str]:
+        hot_project = self._hot_project(payload)
+        if not hot_project:
+            return []
+        facts = "\n".join(
+            [
+                "共同关注 %s 人" % self._markdown_escape(str(hot_project.get("commonCount") or 0)),
+                "早期分 %s" % self._markdown_escape(str(hot_project.get("earlyScore") or 0)),
+                "阶段 %s" % self._markdown_escape(str(hot_project.get("followerStage") or "未分层")),
+            ]
+        )
+        sections = [self._markdown_section("🔥 热点项目", facts)]
+        trend = self._hot_project_trend_text(hot_project, html_mode=False)
+        if trend:
+            sections.append(self._markdown_section("升温线", trend))
+        return sections
+
+    def _hot_project_trend_text(self, hot_project: dict[str, Any], *, html_mode: bool) -> str:
+        events = hot_project.get("trendEvents") or []
+        if not isinstance(events, list):
+            return ""
+        lines = []
+        for item in events[-6:]:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "")
+            if not text:
+                continue
+            lines.append(html.escape(text) if html_mode else self._markdown_escape(text))
+        separator = "<br>" if html_mode else "\n"
+        return separator.join(lines)
 
     def _section(self, label: str, content: str) -> str:
         if not content:
@@ -583,10 +681,20 @@ class TelegramNotifier:
 class WxPusherNotifier:
     endpoint = "https://wxpusher.zjiecode.com/api/send/message"
 
-    def __init__(self, app_token: str, uids: list[str], proxy: str = "") -> None:
+    def __init__(
+        self,
+        app_token: str,
+        uids: list[str],
+        proxy: str = "",
+        *,
+        hot_filter_enabled: bool = False,
+        hot_filter_min_common: int = 2,
+    ) -> None:
         self.app_token = app_token
         self.uids = [uid for uid in uids if uid]
         self.proxy = proxy
+        self.hot_filter_enabled = bool(hot_filter_enabled)
+        self.hot_filter_min_common = max(int(hot_filter_min_common), 2)
         self.formatter = EventFormatter(proxy)
 
     @property
@@ -596,6 +704,8 @@ class WxPusherNotifier:
     def send_event(self, event: dict[str, Any]) -> NotificationResult:
         if not self.configured:
             return NotificationResult(False, "wxpusher_not_configured")
+        if self.hot_filter_enabled and _event_hot_common_count(event) < self.hot_filter_min_common:
+            return NotificationResult(False, None, skipped=True)
         payload = json.dumps(
             {
                 "appToken": self.app_token,
@@ -651,6 +761,8 @@ class BarkNotifier:
         call: bool = False,
         volume: int = 5,
         proxy: str = "",
+        hot_filter_enabled: bool = False,
+        hot_filter_min_common: int = 2,
     ) -> None:
         self.server_url = (server_url or "https://api.day.app").strip().rstrip("/")
         self.device_keys = [key for key in device_keys if key]
@@ -660,6 +772,8 @@ class BarkNotifier:
         self.call = call
         self.volume = min(max(int(volume), 0), 10)
         self.proxy = proxy
+        self.hot_filter_enabled = bool(hot_filter_enabled)
+        self.hot_filter_min_common = max(int(hot_filter_min_common), 2)
         self.formatter = EventFormatter(proxy)
 
     @property
@@ -669,6 +783,8 @@ class BarkNotifier:
     def send_event(self, event: dict[str, Any]) -> NotificationResult:
         if not self.configured:
             return NotificationResult(False, "bark_not_configured")
+        if self.hot_filter_enabled and _event_hot_common_count(event) < self.hot_filter_min_common:
+            return NotificationResult(False, None, skipped=True)
         effective_level = "critical" if self.call else self.level
         payload = {
             "title": self.formatter.bark_title(event),
@@ -758,14 +874,18 @@ class CompositeNotifier:
         if not self.adapters:
             return NotificationResult(False, "notification_not_configured")
         sent = False
+        skipped = False
         errors = []
         for adapter in self.adapters:
             if not getattr(adapter, "configured", False):
                 continue
             result = adapter.send_event(event)
             sent = sent or result.sent
+            skipped = skipped or result.skipped
             if not result.sent and result.error:
                 errors.append(result.error)
         if sent:
             return NotificationResult(True, "; ".join(errors) or None)
+        if skipped and not errors:
+            return NotificationResult(False, None, skipped=True)
         return NotificationResult(False, "; ".join(errors) or "notification_not_configured")

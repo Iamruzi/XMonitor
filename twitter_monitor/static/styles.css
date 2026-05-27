@@ -806,6 +806,11 @@ a {
   color: var(--amber);
 }
 
+.common-badge.hot {
+  background: #ffe3b0;
+  box-shadow: 0 0 0 2px rgba(242, 180, 90, 0.22);
+}
+
 .project-tag.signal {
   background: #eaf6ef;
   color: #24734f;
@@ -840,9 +845,29 @@ a {
   gap: 6px;
 }
 
+.trend-list {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid #f2d18b;
+  border-radius: 7px;
+  background: #fff8ea;
+}
+
+.trend-row {
+  color: #5c6470;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.trend-row.hot {
+  color: #a45b00;
+  font-weight: 900;
+}
+
 .evidence-row {
   display: grid;
-  grid-template-columns: minmax(72px, 0.7fr) minmax(72px, 0.8fr) minmax(92px, 1fr) minmax(78px, 0.8fr) 116px;
+  grid-template-columns: minmax(72px, 0.7fr) minmax(72px, 0.8fr) minmax(92px, 1fr) minmax(78px, 0.8fr) minmax(176px, max-content);
   gap: 6px;
   align-items: center;
   min-height: 34px;
@@ -855,11 +880,15 @@ a {
 
 .evidence-row span,
 .evidence-row strong,
-.evidence-row a,
-.evidence-row time {
+.evidence-row a {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-row time {
+  min-width: 176px;
   white-space: nowrap;
 }
 
@@ -989,6 +1018,10 @@ a {
 
 .field-grid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hot-filter-toggle {
+  min-height: 38px;
 }
 
 .group-add {

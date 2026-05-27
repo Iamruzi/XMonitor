@@ -59,6 +59,10 @@ class MonitorSettings:
 
     @property
     def admin_required(self) -> bool:
+        return True
+
+    @property
+    def admin_configured(self) -> bool:
         return bool(self.admin_token)
 
 
@@ -79,7 +83,7 @@ def load_settings() -> MonitorSettings:
         background_worker=_as_bool(os.environ.get("MONITOR_BACKGROUND_WORKER"), True),
         default_tweet_fetch_count=_as_int(os.environ.get("MONITOR_TWEET_FETCH_COUNT"), 10),
         default_following_fetch_count=_as_int(os.environ.get("MONITOR_FOLLOWING_FETCH_COUNT"), 40),
-        admin_token=os.environ.get("MONITOR_ADMIN_TOKEN", "Vip.123456"),
+        admin_token=os.environ.get("MONITOR_ADMIN_TOKEN", "").strip(),
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
         telegram_proxy=os.environ.get("TELEGRAM_PROXY", "") or os.environ.get("TWITTER_PROXY", ""),

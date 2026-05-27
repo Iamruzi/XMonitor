@@ -195,6 +195,10 @@ class MonitorPoller:
         sent = 0
         errors = 0
         for user in reversed(new_users):
+            payload = user_profile_to_dict(user)
+            hot_context = self.storage.followed_account_context(str(user.id))
+            if hot_context and hot_context.get("isProject") and int(hot_context.get("commonCount") or 0) >= 2:
+                payload["hotProject"] = self._hot_project_payload(hot_context)
             event = self.storage.create_event(
                 target_id=target_id,
                 event_type="following",
@@ -202,7 +206,7 @@ class MonitorPoller:
                 title="%s（@%s）" % (user.name, user.screen_name),
                 body=user.bio,
                 url="https://x.com/%s" % user.screen_name,
-                payload=user_profile_to_dict(user),
+                payload=payload,
             )
             if event:
                 outcome = self._notify(event)
@@ -222,6 +226,20 @@ class MonitorPoller:
             error=None if outcome.sent else outcome.error,
         )
         return {"sent": outcome.sent, "error": outcome.error}
+
+    def _hot_project_payload(self, account: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "userId": str(account.get("userId") or ""),
+            "handle": str(account.get("handle") or ""),
+            "name": str(account.get("name") or ""),
+            "category": str(account.get("category") or ""),
+            "commonCount": int(account.get("commonCount") or 0),
+            "earlyScore": int(account.get("earlyScore") or 0),
+            "followerStage": str(account.get("followerStage") or ""),
+            "discoverySignals": list(account.get("discoverySignals") or []),
+            "latestTrendText": str(account.get("latestTrendText") or ""),
+            "trendEvents": list(account.get("trendEvents") or []),
+        }
 
     def _notification_adapter(self, channel: str = "all") -> CompositeNotifier:
         channel = self._normalize_channel(channel)
@@ -247,6 +265,8 @@ class MonitorPoller:
                 str(wx_app_token or ""),
                 [str(uid) for uid in wx_uids],
                 db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
+                hot_filter_enabled=self._setting_bool(wx_settings.get("wxpusher_hot_filter_enabled"), False),
+                hot_filter_min_common=self._setting_int(wx_settings.get("wxpusher_hot_filter_min_common"), 2),
             )
             if self._setting_bool(wx_settings.get("wxpusher_enabled"), True)
             else None
@@ -263,6 +283,8 @@ class MonitorPoller:
                 call=self._setting_bool(bark_settings.get("bark_call"), self.settings.bark_call),
                 volume=self._setting_int(bark_settings.get("bark_volume"), self.settings.bark_volume),
                 proxy=db_settings.get("telegram_proxy") or self.settings.telegram_proxy,
+                hot_filter_enabled=self._setting_bool(bark_settings.get("bark_hot_filter_enabled"), False),
+                hot_filter_min_common=self._setting_int(bark_settings.get("bark_hot_filter_min_common"), 2),
             )
             if self._setting_bool(bark_settings.get("bark_enabled"), True)
             else None
