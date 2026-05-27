@@ -28,7 +28,13 @@ const EVENT_LABELS = {
 
 function headers() {
   const result = { "Content-Type": "application/json" };
-  if (state.token) result["X-Admin-Token"] = state.token;
+  if (state.token) {
+    try {
+      result["X-Admin-Token"] = encodeURIComponent(state.token);
+    } catch (_) {
+      throw new Error("管理密钥包含无效字符，请重新输入");
+    }
+  }
   return result;
 }
 

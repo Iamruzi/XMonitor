@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote_to_bytes
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, Response
@@ -141,10 +142,24 @@ class PollSettingsUpdate(BaseModel):
     poll_backoff_max_seconds: int
 
 
+def _admin_token_matches(provided: str | None, expected: str) -> bool:
+    if not provided:
+        return False
+    expected_bytes = expected.encode("utf-8")
+    candidates = [provided.encode("utf-8")]
+    try:
+        decoded = unquote_to_bytes(provided)
+    except ValueError:
+        decoded = b""
+    if decoded and decoded not in candidates:
+        candidates.append(decoded)
+    return any(hmac.compare_digest(candidate, expected_bytes) for candidate in candidates)
+
+
 def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
     if not settings.admin_token:
         raise HTTPException(status_code=503, detail="服务端未配置 MONITOR_ADMIN_TOKEN，管理后台已锁定")
-    if not x_admin_token or not hmac.compare_digest(x_admin_token, settings.admin_token):
+    if not _admin_token_matches(x_admin_token, settings.admin_token):
         raise HTTPException(status_code=401, detail="请输入正确的管理密钥")
 
 
