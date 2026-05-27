@@ -778,7 +778,7 @@ a {
 
 .project-filters {
   display: grid;
-  grid-template-columns: minmax(160px, 0.7fr) 130px minmax(260px, 1fr) 150px;
+  grid-template-columns: minmax(150px, 0.7fr) 130px 140px minmax(240px, 1fr) 150px;
   gap: 8px;
   align-items: end;
   margin-bottom: 12px;
@@ -922,6 +922,89 @@ a {
 .evidence-list {
   display: grid;
   gap: 6px;
+}
+
+.project-timeline {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #ead4a1;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.timeline-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.timeline-head strong {
+  font-size: 12px;
+}
+
+.timeline-head span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.timeline-items {
+  display: grid;
+  gap: 7px;
+}
+
+.timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(142px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 26px;
+  color: #475467;
+  font-size: 12px;
+}
+
+.timeline-item::before {
+  position: absolute;
+  left: 11px;
+  top: 23px;
+  bottom: -8px;
+  width: 1px;
+  background: #edd3a4;
+  content: "";
+}
+
+.timeline-item:last-child::before {
+  display: none;
+}
+
+.timeline-item i {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #ffe3b0;
+  color: var(--amber);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.timeline-item time {
+  color: var(--amber);
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.timeline-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .evidence-row {
@@ -1284,5 +1367,32 @@ a {
 
   .evidence-row time {
     grid-column: 1 / -1;
+  }
+
+  .timeline-head,
+  .timeline-item {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-head {
+    align-items: flex-start;
+  }
+
+  .timeline-item {
+    padding-left: 30px;
+  }
+
+  .timeline-item i {
+    position: absolute;
+    left: 0;
+    top: 1px;
+  }
+
+  .timeline-item::before {
+    left: 11px;
+  }
+
+  .timeline-item span {
+    white-space: normal;
   }
 }

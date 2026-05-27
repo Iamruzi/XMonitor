@@ -512,6 +512,27 @@ function signalTags(project) {
   )).join("");
 }
 
+function timeValue(value) {
+  if (!value) return 0;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function projectLatestFollowTime(project) {
+  return Math.max(
+    timeValue(project.lastSeenAt),
+    ...(project.followedBy || []).map((target) => timeValue(target.firstSeenAt))
+  );
+}
+
+function projectEarliestFollowTime(project) {
+  const values = [
+    timeValue(project.firstSeenAt),
+    ...(project.followedBy || []).map((target) => timeValue(target.firstSeenAt)),
+  ].filter(Boolean);
+  return values.length ? Math.min(...values) : 0;
+}
+
 function projectHeat(project) {
   const common = Number(project.commonCount || 0);
   if (!project.isProject) {
@@ -549,6 +570,50 @@ function projectHeat(project) {
     fireText: `🔥 ${common}`,
     show: true,
   };
+}
+
+function sortedProjectTimeline(followedBy) {
+  return [...(followedBy || [])].sort((a, b) => {
+    const diff = timeValue(a.firstSeenAt) - timeValue(b.firstSeenAt);
+    if (diff) return diff;
+    return String(a.handle || "").localeCompare(String(b.handle || ""));
+  });
+}
+
+function projectTimeline(project) {
+  if (!project.isProject) return "";
+  const timeline = sortedProjectTimeline(project.followedBy);
+  if (!timeline.length) return "";
+  const earliest = projectEarliestFollowTime(project);
+  const latest = projectLatestFollowTime(project);
+  const earliestText = earliest ? fmt(new Date(earliest).toISOString().replace(".000Z", "Z")) : "";
+  const latestText = latest ? fmt(new Date(latest).toISOString().replace(".000Z", "Z")) : "";
+  const meta = earliest && latest
+    ? `最早 ${earliestText} · 最近 ${latestText}`
+    : "按发现关注的时间排序";
+  return `
+    <div class="project-timeline">
+      <div class="timeline-head">
+        <strong>关注时间线</strong>
+        <span>${escapeHtml(meta)}</span>
+      </div>
+      <div class="timeline-items">
+        ${timeline.map((target, index) => {
+          const firstSeen = fmt(target.firstSeenAt);
+          const label = targetBriefLabel(target);
+          const group = target.groupName || "未分组";
+          const remark = target.remarkName || "无备注";
+          return `
+            <div class="timeline-item">
+              <i>${index + 1}</i>
+              <time title="${escapeHtml(firstSeen)}">${escapeHtml(firstSeen)}</time>
+              <span>${escapeHtml(group)} · ${escapeHtml(remark)} · ${escapeHtml(label)}</span>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>
+  `;
 }
 
 function projectEvidenceText(project) {
@@ -719,6 +784,27 @@ function projectMatches(project) {
   ].join(" ").toLowerCase().includes(keyword);
 }
 
+function sortProjects(projects) {
+  const mode = $("projectSort")?.value || "heat";
+  return [...projects].sort((a, b) => {
+    if (mode === "timeline") {
+      return (
+        projectLatestFollowTime(b) - projectLatestFollowTime(a) ||
+        Number(b.commonCount || 0) - Number(a.commonCount || 0) ||
+        Number(Boolean(b.isProject)) - Number(Boolean(a.isProject)) ||
+        String(a.handle || "").localeCompare(String(b.handle || ""))
+      );
+    }
+    return (
+      Number(b.commonCount || 0) - Number(a.commonCount || 0) ||
+      Number(Boolean(b.isProject)) - Number(Boolean(a.isProject)) ||
+      Number(b.earlyScore || 0) - Number(a.earlyScore || 0) ||
+      projectLatestFollowTime(b) - projectLatestFollowTime(a) ||
+      String(a.handle || "").localeCompare(String(b.handle || ""))
+    );
+  });
+}
+
 function projectCard(project) {
   const card = document.createElement("article");
   const heat = projectHeat(project);
@@ -747,6 +833,7 @@ function projectCard(project) {
     </div>
     <p>${escapeHtml(project.summary || "")}</p>
     <div class="project-reason">${escapeHtml(project.reason || "")}</div>
+    ${projectTimeline(project)}
     <div class="evidence-list">${evidenceRows(followedBy)}</div>
     ${project.url ? `<a class="project-url" href="${escapeHtml(project.url)}" target="_blank" rel="noreferrer">${escapeHtml(project.url)}</a>` : ""}
   `;
@@ -757,7 +844,7 @@ function renderProjects() {
   const list = $("projectsList");
   if (!list) return;
   const allProjects = state.insights?.accounts || state.insights?.projects || [];
-  const projects = allProjects.filter(projectMatches);
+  const projects = sortProjects(allProjects.filter(projectMatches));
   $("projectCount").textContent = `${projects.length} / ${allProjects.length} 个`;
   list.innerHTML = "";
   if (!projects.length) {
@@ -1346,6 +1433,11 @@ $("projectMinCommon").addEventListener("change", async () => {
 
 ["projectSearch", "projectOnly"].forEach((id) => {
   $(id).addEventListener("input", renderProjects);
+});
+
+$("projectSort").addEventListener("change", () => {
+  renderProjects();
+  showToast(`已切换为${$("projectSort").selectedOptions[0]?.textContent || "当前"}排序`);
 });
 
 $("eventPrev").addEventListener("click", () => {
