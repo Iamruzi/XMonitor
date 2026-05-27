@@ -38,6 +38,7 @@ class FakeClient:
             )
         ]
         self.following = [UserProfile(id="f1", name="Bob", screen_name="bob")]
+        self.following_counts = []
 
     def fetch_user(self, handle: str) -> UserProfile:
         return UserProfile(id="target-id", name="Target", screen_name=handle)
@@ -46,6 +47,7 @@ class FakeClient:
         return self.tweets[:count]
 
     def fetch_following(self, user_id: str, count: int):
+        self.following_counts.append(count)
         return self.following[:count]
 
 
@@ -94,6 +96,18 @@ def test_first_poll_snapshots_without_notifications(tmp_path) -> None:
     insights = storage.following_insights(min_common=1)
     assert insights["summary"]["profiledAccounts"] == 1
     assert insights["projects"] == []
+
+
+def test_first_following_poll_uses_initial_backfill_count(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    target = storage.add_target("alice", monitor_tweets=False, following_fetch_count=10)
+    client = FakeClient()
+    poller = FakePoller(storage, _settings(storage.db_path), FakeNotifier(), client)
+
+    poller.poll_target(target)
+
+    assert client.following_counts == [200]
 
 
 def test_second_poll_creates_events_for_new_items(tmp_path) -> None:
@@ -153,6 +167,39 @@ def test_following_event_payload_includes_hot_project_context(tmp_path) -> None:
     payload = json.loads(event["payload_json"])
     assert payload["hotProject"]["commonCount"] == 2
     assert payload["hotProject"]["trendEvents"][1]["marker"] == "🔥"
+
+
+def test_backfill_following_supplements_shared_project_context(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    alice = storage.add_target("alice", monitor_tweets=False)
+    bob = storage.add_target("bob", monitor_tweets=False)
+    carol = storage.add_target("carol", monitor_tweets=False, following_fetch_count=10)
+    project = UserProfile(
+        id="project-1",
+        name="Bound Exchange",
+        screen_name="Bound_Exchange",
+        bio="Official exchange protocol.",
+        followers_count=12000,
+        url="https://bound.exchange",
+    )
+    storage.upsert_followed_users([project])
+    storage.add_seen_following(alice["id"], ["project-1"])
+    storage.add_seen_following(bob["id"], ["project-1"])
+    client = FakeClient()
+    client.following = [project]
+    poller = FakePoller(storage, _settings(storage.db_path), FakeNotifier(), client)
+
+    result = poller.backfill_following(carol)
+
+    assert client.following_counts == [200]
+    assert result["backfilledFollowing"] == 1
+    assert result["sharedMatches"] == 1
+    assert result["projectMatches"] == 1
+    context = storage.followed_account_context("project-1")
+    assert context is not None
+    assert context["commonCount"] == 3
+    assert {target["handle"] for target in context["followedBy"]} == {"alice", "bob", "carol"}
 
 
 def test_poller_classifies_replies_and_retweets(tmp_path) -> None:

@@ -884,16 +884,16 @@ class MonitorStorage:
         ]
 
         accounts = self._account_cards_from_relations(visible_relations, profiles)
-        radar_projects = [
+        radar_accounts = [
             account for account in accounts
-            if account["commonCount"] >= min_common and account["isProject"]
+            if account["commonCount"] >= min_common
         ]
-        radar_projects.sort(key=self._account_sort_key)
+        radar_accounts.sort(key=self._account_sort_key)
 
         group_cards = self._group_insight_cards(targets, relation_rows, profiles, min_common=min_common)
         followed_accounts = len(accounts)
         shared_accounts = sum(1 for account in accounts if account["commonCount"] >= 2)
-        project_accounts = len(radar_projects)
+        project_accounts = sum(1 for account in radar_accounts if account["isProject"])
         monitors_with_following = {
             int(row["target_id"]) for row in visible_relations if int(row["target_id"]) in visible_target_ids
         }
@@ -911,7 +911,8 @@ class MonitorStorage:
                 "generatedAt": utc_now(),
             },
             "groups": group_cards,
-            "projects": radar_projects[:limit],
+            "accounts": radar_accounts[:limit],
+            "projects": radar_accounts[:limit],
         }
 
     def _account_cards_from_relations(
@@ -991,11 +992,11 @@ class MonitorStorage:
         cards = []
         for name, group in groups.items():
             accounts = self._account_cards_from_relations(group["relations"], profiles)
-            shared_projects = [
+            shared_accounts = [
                 account for account in accounts
-                if account["commonCount"] >= min_common and account["isProject"]
+                if account["commonCount"] >= min_common
             ]
-            shared_projects.sort(key=self._account_sort_key)
+            shared_accounts.sort(key=self._account_sort_key)
             cards.append(
                 {
                     "name": name,
@@ -1003,9 +1004,10 @@ class MonitorStorage:
                     "enabledCount": int(group["enabledCount"]),
                     "followingAccounts": len(accounts),
                     "sharedAccounts": sum(1 for account in accounts if account["commonCount"] >= 2),
-                    "projectAccounts": len(shared_projects),
+                    "projectAccounts": sum(1 for account in shared_accounts if account["isProject"]),
                     "targets": group["targets"],
-                    "topProjects": shared_projects[:8],
+                    "topAccounts": shared_accounts[:8],
+                    "topProjects": shared_accounts[:8],
                 }
             )
         return sorted(cards, key=lambda item: (-int(item["targetCount"]), str(item["name"])))

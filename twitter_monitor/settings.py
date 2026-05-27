@@ -37,6 +37,7 @@ class MonitorSettings:
     wxpusher_app_token: str
     wxpusher_uids: str
     telegram_commands_enabled: bool
+    default_initial_following_fetch_count: int = 200
     bark_server_url: str = "https://api.day.app"
     bark_device_keys: str = ""
     bark_level: str = "active"
@@ -83,6 +84,10 @@ def load_settings() -> MonitorSettings:
         background_worker=_as_bool(os.environ.get("MONITOR_BACKGROUND_WORKER"), True),
         default_tweet_fetch_count=_as_int(os.environ.get("MONITOR_TWEET_FETCH_COUNT"), 10),
         default_following_fetch_count=_as_int(os.environ.get("MONITOR_FOLLOWING_FETCH_COUNT"), 40),
+        default_initial_following_fetch_count=_as_int(
+            os.environ.get("MONITOR_INITIAL_FOLLOWING_FETCH_COUNT"),
+            200,
+        ),
         admin_token=os.environ.get("MONITOR_ADMIN_TOKEN", "").strip(),
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),

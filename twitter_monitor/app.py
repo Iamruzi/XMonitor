@@ -356,6 +356,7 @@ def config() -> dict[str, Any]:
         "nextPollAt": next_poll_at.isoformat() if isinstance(next_poll_at, datetime) else None,
         "defaultTweetFetchCount": settings.default_tweet_fetch_count,
         "defaultFollowingFetchCount": settings.default_following_fetch_count,
+        "defaultInitialFollowingFetchCount": settings.default_initial_following_fetch_count,
         "notification": notification,
         "stats": storage.stats(),
     }
@@ -527,6 +528,15 @@ async def poll_one(target_id: int) -> dict[str, Any]:
     if not target:
         raise HTTPException(status_code=404, detail="Target not found")
     result = await asyncio.to_thread(poller.poll_target, target)
+    return {"data": result}
+
+
+@app.post("/api/targets/{target_id}/following/backfill", dependencies=[Depends(require_admin)])
+async def backfill_target_following(target_id: int) -> dict[str, Any]:
+    target = storage.get_target(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="Target not found")
+    result = await asyncio.to_thread(poller.backfill_following, target)
     return {"data": result}
 
 

@@ -18,7 +18,9 @@ twitter-monitor
 - Bark iOS 通知，支持普通、时效、紧急、持续响铃和自定义铃声
 - 外文正文和简介自动尝试翻译成中文
 - 前端可配置 Telegram Bot Token、接收聊天、WxPusher AppToken、UID、Bark 设备码、轮询间隔
-- 项目雷达展示共同关注证据、升温线和早期项目信号，WxPusher/Bark 可只推热点项目
+- 项目雷达展示所有共同关注账号，可筛选疑似项目，并展示证据、升温线和早期项目信号
+- 新监控用户首次基线会拉取更大关注范围，手动“补齐”可补充已有用户的共同关注关系
+- WxPusher/Bark 可只推热点项目
 - 支持批量导入和导出监控用户
 - 支持后台自动轮询、随机抖动和失败退避
 - 支持 systemd 常驻部署和 Tailscale 内网访问
@@ -331,6 +333,7 @@ SkyAAmen,项目方,重点观察
 | `MONITOR_POLL_BACKOFF_MAX` | 否 | `1800` | 失败后最长退避，秒 |
 | `MONITOR_TWEET_FETCH_COUNT` | 否 | `10` | 每次拉取最近多少条推文 |
 | `MONITOR_FOLLOWING_FETCH_COUNT` | 否 | `40` | 每次拉取最近多少个关注 |
+| `MONITOR_INITIAL_FOLLOWING_FETCH_COUNT` | 否 | `200` | 新用户首次基线和手动补齐时拉取多少个关注 |
 | `MONITOR_TG_COMMANDS` | 否 | `true` | 是否启用 Telegram Bot 管理 |
 | `MONITOR_TIMEZONE` | 否 | `Asia/Shanghai` | 通知时间显示时区 |
 | `MONITOR_TRANSLATE_ENABLED` | 否 | `true` | 是否启用翻译 |

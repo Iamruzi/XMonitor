@@ -246,7 +246,8 @@ def test_storage_builds_following_insights_from_shared_accounts(tmp_path) -> Non
     assert insights["summary"]["followedAccounts"] == 3
     assert insights["summary"]["sharedAccounts"] == 3
     assert insights["summary"]["projectAccounts"] == 1
-    assert len(insights["projects"]) == 1
+    assert len(insights["projects"]) == 3
+    assert len(insights["accounts"]) == 3
     assert insights["projects"][0]["handle"] == "monad_xyz"
     assert insights["projects"][0]["commonCount"] == 3
     assert insights["projects"][0]["isProject"] is True
@@ -267,12 +268,15 @@ def test_storage_builds_following_insights_from_shared_accounts(tmp_path) -> Non
     assert alpha["targetCount"] == 2
     assert alpha["sharedAccounts"] == 2
     assert alpha["projectAccounts"] == 1
+    assert len(alpha["topProjects"]) == 2
+    assert len(alpha["topAccounts"]) == 2
     assert alpha["topProjects"][0]["commonCount"] == 2
 
     alpha_only = storage.following_insights(group_name="alpha猎手", min_common=2)
     assert alpha_only["summary"]["monitoredUsers"] == 2
     assert alpha_only["summary"]["sharedAccounts"] == 2
     assert alpha_only["summary"]["projectAccounts"] == 1
+    assert len(alpha_only["projects"]) == 2
     assert alpha_only["projects"][0]["commonCount"] == 2
 
     context = storage.followed_account_context("project-1")

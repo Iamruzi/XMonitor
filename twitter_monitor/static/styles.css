@@ -469,13 +469,14 @@ a {
 
 .row-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
 }
 
 .row-actions button {
   min-height: 30px;
-  padding: 0 8px;
+  padding: 0 7px;
   font-size: 12px;
 }
 
@@ -867,7 +868,7 @@ a {
 
 .evidence-row {
   display: grid;
-  grid-template-columns: minmax(72px, 0.7fr) minmax(72px, 0.8fr) minmax(92px, 1fr) minmax(78px, 0.8fr) minmax(176px, max-content);
+  grid-template-columns: minmax(72px, 0.7fr) minmax(72px, 0.8fr) minmax(92px, 1fr) minmax(78px, 0.8fr);
   gap: 6px;
   align-items: center;
   min-height: 34px;
@@ -888,7 +889,9 @@ a {
 }
 
 .evidence-row time {
-  min-width: 176px;
+  grid-column: 1 / -1;
+  min-width: 0;
+  justify-self: end;
   white-space: nowrap;
 }
 

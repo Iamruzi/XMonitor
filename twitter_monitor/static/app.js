@@ -242,6 +242,7 @@ function targetRow(target) {
       <div class="row-actions">
         <button data-action="save" class="primary" type="button">保存</button>
         <button data-action="poll" type="button">检查</button>
+        <button data-action="backfill" type="button" title="按首次补齐数量重新采集关注，不推送历史事件">补齐</button>
         <button data-action="delete" class="danger" type="button">删除</button>
       </div>
     </td>
@@ -264,6 +265,22 @@ function targetRow(target) {
       await api(`/api/targets/${target.id}/poll`, { method: "POST" });
       await refreshAll();
       setStatus(`已检查 @${target.handle}`);
+    } catch (error) {
+      setStatus(error.message, true);
+    }
+  });
+  tr.querySelector('[data-action="backfill"]').addEventListener("click", async () => {
+    try {
+      setStatus(`正在补齐 @${target.handle} 的关注关系...`);
+      const payload = await api(`/api/targets/${target.id}/following/backfill`, { method: "POST" });
+      const data = payload.data || {};
+      if (data.error) throw new Error(data.error);
+      setStatus(
+        `已补齐 @${data.handle || target.handle}：拉取 ${Number(data.fetchedFollowing || 0)} 个，` +
+        `新增 ${Number(data.backfilledFollowing || 0)} 个，共同 ${Number(data.sharedMatches || 0)} 个，` +
+        `项目 ${Number(data.projectMatches || 0)} 个`
+      );
+      await refreshAll();
     } catch (error) {
       setStatus(error.message, true);
     }
@@ -425,13 +442,14 @@ function evidenceRows(followedBy) {
     const display = target.displayName || handle;
     const group = target.groupName || "未分组";
     const remark = target.remarkName || "无备注";
+    const firstSeen = fmt(target.firstSeenAt);
     return `
       <div class="evidence-row">
         <span class="evidence-group">分组 ${escapeHtml(group)}</span>
         <span class="evidence-remark">备注 ${escapeHtml(remark)}</span>
         <strong>${escapeHtml(display)}</strong>
         <a href="https://x.com/${escapeHtml(handle)}" target="_blank" rel="noreferrer">@${escapeHtml(handle)}</a>
-        <time>关注 ${escapeHtml(fmt(target.firstSeenAt))}</time>
+        <time title="${escapeHtml(firstSeen)}">关注 ${escapeHtml(firstSeen)}</time>
       </div>
     `;
   }).join("");
@@ -573,7 +591,7 @@ function renderGroupDetail() {
   const projects = $("groupDetailProjects");
   projects.innerHTML = "";
   if (!group.topProjects?.length) {
-    projects.innerHTML = '<div class="group-empty">这个分组还没有被多人共同关注的项目账号</div>';
+    projects.innerHTML = '<div class="group-empty">这个分组还没有被多人共同关注的账号</div>';
   } else {
     group.topProjects.forEach((project) => projects.appendChild(miniProjectItem(project)));
   }
@@ -656,12 +674,12 @@ function projectCard(project) {
 function renderProjects() {
   const list = $("projectsList");
   if (!list) return;
-  const allProjects = state.insights?.projects || [];
+  const allProjects = state.insights?.accounts || state.insights?.projects || [];
   const projects = allProjects.filter(projectMatches);
   $("projectCount").textContent = `${projects.length} / ${allProjects.length} 个`;
   list.innerHTML = "";
   if (!projects.length) {
-    list.innerHTML = '<div class="project-empty">没有满足共同关注人数的项目账号</div>';
+    list.innerHTML = '<div class="project-empty">没有满足共同关注人数的账号</div>';
     return;
   }
   projects.forEach((project) => list.appendChild(projectCard(project)));
@@ -675,7 +693,7 @@ async function loadInsights() {
   const group = $("projectGroupFilter")?.value || "";
   if (group) params.set("group", group);
   const payload = await api(`/api/following-insights?${params.toString()}`);
-  state.insights = payload.data || { summary: {}, groups: [], projects: [] };
+  state.insights = payload.data || { summary: {}, groups: [], accounts: [], projects: [] };
   renderInsightMetrics();
   renderProjectGroupFilter();
   renderGroupCards();

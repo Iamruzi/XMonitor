@@ -86,6 +86,66 @@ class MonitorPoller:
             result["error"] = str(exc)
         return result
 
+    def backfill_following(self, target: dict[str, Any], count: int | None = None) -> dict[str, Any]:
+        target_id = int(target["id"])
+        handle = str(target["handle"])
+        result = {
+            "targetId": target_id,
+            "handle": handle,
+            "countRequested": 0,
+            "fetchedFollowing": 0,
+            "backfilledFollowing": 0,
+            "sharedMatches": 0,
+            "projectMatches": 0,
+        }  # type: dict[str, Any]
+        try:
+            client = self._make_client()
+            profile = client.fetch_user(handle)
+            self.storage.set_profile(
+                target_id,
+                user_id=profile.id,
+                handle=profile.screen_name or handle,
+                display_name=profile.name,
+            )
+
+            fetch_count = self._following_fetch_count(target, initial=True)
+            if count is not None:
+                fetch_count = max(fetch_count, int(count))
+            users = client.fetch_following(profile.id, fetch_count)
+            user_ids = [user.id for user in users if user.id]
+            known_ids = self.storage.get_seen_following_ids(target_id, user_ids)
+            new_ids = [user_id for user_id in user_ids if user_id not in known_ids]
+
+            self.storage.upsert_followed_users(users)
+            self.storage.add_seen_following(target_id, user_ids)
+            self.storage.set_initialized(target_id, following=True)
+            self.storage.set_checked(target_id, error=None)
+
+            shared_matches = 0
+            project_matches = 0
+            for user_id in user_ids:
+                context = self.storage.followed_account_context(str(user_id))
+                if not context or int(context.get("commonCount") or 0) < 2:
+                    continue
+                shared_matches += 1
+                project_matches += int(bool(context.get("isProject")))
+
+            result.update(
+                {
+                    "handle": profile.screen_name or handle,
+                    "countRequested": fetch_count,
+                    "fetchedFollowing": len(user_ids),
+                    "backfilledFollowing": len(new_ids),
+                    "sharedMatches": shared_matches,
+                    "projectMatches": project_matches,
+                }
+            )
+        except Exception as exc:
+            logger.exception("Failed to backfill following for @%s", handle)
+            self.storage.set_checked(target_id, error=str(exc))
+            result["error"] = str(exc)
+        return result
+
     def _make_client(self) -> TwitterClient:
         auth_token = os.environ.get("TWITTER_AUTH_TOKEN", "")
         ct0 = os.environ.get("TWITTER_CT0", "")
@@ -175,7 +235,7 @@ class MonitorPoller:
 
     def _poll_following(self, client: TwitterClient, target: dict[str, Any], user_id: str) -> dict[str, Any]:
         target_id = int(target["id"])
-        count = int(target.get("following_fetch_count") or self.settings.default_following_fetch_count)
+        count = self._following_fetch_count(target, initial=not target.get("following_initialized"))
         users = client.fetch_following(user_id, count)
         user_ids = [user.id for user in users if user.id]
         known_ids = self.storage.get_seen_following_ids(target_id, user_ids)
@@ -218,6 +278,12 @@ class MonitorPoller:
             "notificationErrors": errors,
             "snapshotted": [],
         }
+
+    def _following_fetch_count(self, target: dict[str, Any], *, initial: bool) -> int:
+        count = int(target.get("following_fetch_count") or self.settings.default_following_fetch_count)
+        if initial:
+            count = max(count, self.settings.default_initial_following_fetch_count)
+        return count
 
     def _notify(self, event: dict[str, Any]) -> dict[str, Any]:
         outcome = self._notification_adapter().send_event(event)
