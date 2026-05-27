@@ -124,6 +124,59 @@ a {
   display: none !important;
 }
 
+.toast-stack {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 60;
+  display: grid;
+  width: min(360px, calc(100vw - 28px));
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #bfd7c9;
+  border-left: 4px solid var(--green);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 16px 38px rgba(28, 39, 57, 0.16);
+  color: var(--ink);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 160ms ease, transform 160ms ease;
+  pointer-events: auto;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.leaving {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.toast.error {
+  border-color: #e6b1ac;
+  border-left-color: var(--red);
+}
+
+.toast strong {
+  font-size: 12px;
+}
+
+.toast span {
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: var(--blue);
@@ -758,10 +811,21 @@ a {
   padding: 13px;
 }
 
+.project-card.attention {
+  border-color: #f2b45a;
+  background: #fffdf7;
+}
+
 .project-card.hot {
   border-color: #f2b45a;
   background: #fffaf0;
   box-shadow: 0 12px 28px rgba(182, 95, 0, 0.1);
+}
+
+.project-card.super {
+  border-color: #f2a099;
+  background: #fff7f5;
+  box-shadow: 0 14px 32px rgba(180, 35, 24, 0.12);
 }
 
 .project-card-head {
@@ -801,15 +865,29 @@ a {
   font-weight: 900;
 }
 
-.project-tag.hot,
-.common-badge {
+.project-tag.hot {
   background: #fff0d3;
   color: var(--amber);
 }
 
+.project-tag.heat.attention,
+.common-badge.attention {
+  background: #fff0d3;
+  color: var(--amber);
+}
+
+.project-tag.heat.hot,
 .common-badge.hot {
   background: #ffe3b0;
+  color: var(--amber);
   box-shadow: 0 0 0 2px rgba(242, 180, 90, 0.22);
+}
+
+.project-tag.heat.super,
+.common-badge.super {
+  background: #ffe4df;
+  color: var(--red);
+  box-shadow: 0 0 0 2px rgba(180, 35, 24, 0.16);
 }
 
 .project-tag.signal {
@@ -844,26 +922,6 @@ a {
 .evidence-list {
   display: grid;
   gap: 6px;
-}
-
-.trend-list {
-  display: grid;
-  gap: 5px;
-  padding: 8px;
-  border: 1px solid #f2d18b;
-  border-radius: 7px;
-  background: #fff8ea;
-}
-
-.trend-row {
-  color: #5c6470;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.trend-row.hot {
-  color: #a45b00;
-  font-weight: 900;
 }
 
 .evidence-row {

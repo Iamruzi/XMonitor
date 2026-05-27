@@ -13,6 +13,7 @@ const state = {
   nextPollAt: null,
   lastConfigRefreshAt: 0,
   configRefreshInFlight: false,
+  toastVersion: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -58,14 +59,55 @@ async function api(path, options = {}) {
 
 function setStatus(message, isError = false) {
   const line = $("statusLine");
-  if (!line) return;
-  line.textContent = message || "";
-  line.classList.toggle("error", isError);
+  if (line) {
+    line.textContent = message || "";
+    line.classList.toggle("error", isError);
+  }
+  showToast(message, isError);
 }
 
 function setLoginStatus(message, isError = false) {
   $("loginStatus").textContent = message || "";
   $("loginStatus").classList.toggle("error", isError);
+  showToast(message, isError);
+}
+
+function showToast(message, isError = false) {
+  if (!message) return;
+  const stack = $("toastStack");
+  if (!stack) return;
+  state.toastVersion += 1;
+  const toast = document.createElement("div");
+  toast.className = `toast ${isError ? "error" : ""}`;
+  toast.setAttribute("role", isError ? "alert" : "status");
+
+  const title = document.createElement("strong");
+  title.textContent = isError ? "操作失败" : "操作反馈";
+  const body = document.createElement("span");
+  body.textContent = String(message);
+  toast.append(title, body);
+
+  const dismiss = () => {
+    toast.classList.add("leaving");
+    window.setTimeout(() => toast.remove(), 180);
+  };
+  toast.addEventListener("click", dismiss);
+  stack.appendChild(toast);
+  while (stack.children.length > 4) {
+    stack.firstElementChild?.remove();
+  }
+  window.requestAnimationFrame(() => toast.classList.add("show"));
+  window.setTimeout(dismiss, isError ? 5200 : 3200);
+}
+
+function toastButtonFeedback(button) {
+  const text = (button.dataset.toast || button.textContent || button.title || "").trim();
+  if (!text) return;
+  const previousToastVersion = state.toastVersion;
+  window.setTimeout(() => {
+    if (state.toastVersion !== previousToastVersion) return;
+    showToast(`${text} 已触发`);
+  }, 80);
 }
 
 function showApp() {
@@ -292,7 +334,10 @@ function targetRow(target) {
     }
   });
   tr.querySelector('[data-action="delete"]').addEventListener("click", async () => {
-    if (!confirm(`删除 @${target.handle} 的监控？`)) return;
+    if (!confirm(`删除 @${target.handle} 的监控？`)) {
+      showToast("已取消删除");
+      return;
+    }
     try {
       await api(`/api/targets/${target.id}`, { method: "DELETE" });
       await refreshAll();
@@ -467,14 +512,43 @@ function signalTags(project) {
   )).join("");
 }
 
-function trendRows(project) {
-  const events = project.trendEvents || [];
-  if (!events.length) return "";
-  return `
-    <div class="trend-list">
-      ${events.map((event) => `<div class="trend-row ${event.sequence >= 2 ? "hot" : ""}">${escapeHtml(event.text || "")}</div>`).join("")}
-    </div>
-  `;
+function projectHeat(project) {
+  const common = Number(project.commonCount || 0);
+  if (!project.isProject) {
+    return {
+      className: "",
+      level: "",
+      commonText: `共同 ${common} 人`,
+      fireText: "",
+      show: false,
+    };
+  }
+  if (common <= 2) {
+    return {
+      className: "attention",
+      level: "注意",
+      commonText: `共同 ${common} 人`,
+      fireText: "",
+      show: true,
+    };
+  }
+  if (common <= 5) {
+    const fireText = "🔥".repeat(common - 2);
+    return {
+      className: "hot",
+      level: "火爆",
+      commonText: `${fireText} 共同 ${common} 人`,
+      fireText,
+      show: true,
+    };
+  }
+  return {
+    className: "super",
+    level: "超级火爆",
+    commonText: `🔥 ${common} 人共同关注`,
+    fireText: `🔥 ${common}`,
+    show: true,
+  };
 }
 
 function projectEvidenceText(project) {
@@ -647,20 +721,23 @@ function projectMatches(project) {
 
 function projectCard(project) {
   const card = document.createElement("article");
-  card.className = `project-card ${project.isProject ? "hot" : ""}`;
+  const heat = projectHeat(project);
+  card.className = `project-card ${heat.className}`;
   const profileUrl = `https://x.com/${encodeURIComponent(project.handle || "")}`;
   const followedBy = project.followedBy || [];
   const accountAge = ageText(project.accountAgeDays);
   card.innerHTML = `
     <div class="project-card-head">
       <div>
-        <strong>${project.isHot ? "🔥 " : ""}${escapeHtml(project.name || project.handle)}</strong>
+        <strong>${escapeHtml(project.name || project.handle)}</strong>
         <a href="${profileUrl}" target="_blank" rel="noreferrer">@${escapeHtml(project.handle)}</a>
       </div>
-      <span class="common-badge ${project.isHot ? "hot" : ""}">${project.isHot ? "🔥 " : ""}共同 ${Number(project.commonCount || 0)} 人</span>
+      <span class="common-badge ${heat.className}">${escapeHtml(heat.commonText)}</span>
     </div>
     <div class="project-tags">
       <span class="project-tag ${project.isProject ? "hot" : ""}">${escapeHtml(project.category || "账号")}</span>
+      ${heat.show ? `<span class="project-tag heat ${heat.className}">${escapeHtml(heat.level)}</span>` : ""}
+      ${Number(project.commonCount || 0) > 5 ? '<span class="project-tag heat super">更多关注</span>' : ""}
       ${project.verified ? '<span class="project-tag">已认证</span>' : ""}
       <span class="project-tag">粉丝 ${numberText(project.followers)}</span>
       <span class="project-tag">早期分 ${Number(project.earlyScore || 0)}</span>
@@ -670,7 +747,6 @@ function projectCard(project) {
     </div>
     <p>${escapeHtml(project.summary || "")}</p>
     <div class="project-reason">${escapeHtml(project.reason || "")}</div>
-    ${trendRows(project)}
     <div class="evidence-list">${evidenceRows(followedBy)}</div>
     ${project.url ? `<a class="project-url" href="${escapeHtml(project.url)}" target="_blank" rel="noreferrer">${escapeHtml(project.url)}</a>` : ""}
   `;
@@ -714,7 +790,10 @@ function recipientRow({ id = "", title = "", primary = false } = {}) {
     <input data-field="title" type="text" value="${escapeHtml(title)}" placeholder="${primary ? "主聊天" : "备注"}" />
     <button data-action="remove" type="button" ${primary ? "disabled" : ""}>删除</button>
   `;
-  row.querySelector('[data-action="remove"]').addEventListener("click", () => row.remove());
+  row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+    row.remove();
+    showToast("已删除 Telegram 接收聊天");
+  });
   return row;
 }
 
@@ -725,7 +804,10 @@ function wxpusherRow(uid = "") {
     <input data-field="uid" type="text" value="${escapeHtml(uid)}" placeholder="UID_xxx" />
     <button data-action="remove" type="button">删除</button>
   `;
-  row.querySelector('[data-action="remove"]').addEventListener("click", () => row.remove());
+  row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+    row.remove();
+    showToast("已删除 WxPusher UID");
+  });
   return row;
 }
 
@@ -736,7 +818,10 @@ function barkDeviceRow(deviceKey = "") {
     <input data-field="device_key" type="text" value="${escapeHtml(deviceKey)}" placeholder="Bark 设备码" />
     <button data-action="remove" type="button">删除</button>
   `;
-  row.querySelector('[data-action="remove"]').addEventListener("click", () => row.remove());
+  row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+    row.remove();
+    showToast("已删除 Bark 设备码");
+  });
   return row;
 }
 
@@ -777,9 +862,13 @@ function groupRow(group) {
     state.eventPage = 1;
     renderEvents();
     $("settingsDrawer").classList.add("hidden");
+    showToast(`已筛选分组「${group.name}」`);
   });
   row.querySelector('[data-action="clear"]').addEventListener("click", async () => {
-    if (!confirm(`清空分组「${group.name}」？相关用户会变成未分组，但不会删除用户。`)) return;
+    if (!confirm(`清空分组「${group.name}」？相关用户会变成未分组，但不会删除用户。`)) {
+      showToast("已取消清空分组");
+      return;
+    }
     try {
       await api("/api/groups/clear", {
         method: "POST",
@@ -990,6 +1079,7 @@ $("loginForm").addEventListener("submit", async (event) => {
   try {
     setLoginStatus("正在验证...");
     await loginWithToken(token);
+    showToast("登录成功");
     setLoginStatus("");
   } catch (error) {
     localStorage.removeItem("monitorAdminToken");
@@ -1002,14 +1092,30 @@ $("logout").addEventListener("click", () => {
   localStorage.removeItem("monitorAdminToken");
   state.token = "";
   showLogin();
+  showToast("已退出登录");
 });
 
-$("openSettings").addEventListener("click", () => $("settingsDrawer").classList.remove("hidden"));
-$("closeSettings").addEventListener("click", () => $("settingsDrawer").classList.add("hidden"));
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled) return;
+  toastButtonFeedback(button);
+}, true);
+
+$("openSettings").addEventListener("click", () => {
+  $("settingsDrawer").classList.remove("hidden");
+  showToast("已打开设置");
+});
+$("closeSettings").addEventListener("click", () => {
+  $("settingsDrawer").classList.add("hidden");
+  showToast("已关闭设置");
+});
 $("closeSettingsBackdrop").addEventListener("click", () => $("settingsDrawer").classList.add("hidden"));
 
 document.querySelectorAll("[data-view]").forEach((button) => {
-  button.addEventListener("click", () => setView(button.dataset.view || "overview"));
+  button.addEventListener("click", () => {
+    setView(button.dataset.view || "overview");
+    showToast(`已切换到${button.textContent.trim()}`);
+  });
 });
 
 $("groupDetailEvents").addEventListener("click", () => {
@@ -1022,11 +1128,21 @@ $("groupDetailEvents").addEventListener("click", () => {
   }
   state.eventPage = 1;
   renderEvents();
+  showToast("已切换到事件中心");
 });
 
-$("addTelegramRecipient").addEventListener("click", () => $("telegramRecipients").appendChild(recipientRow()));
-$("addWxpusherRecipient").addEventListener("click", () => $("wxpusherRecipients").appendChild(wxpusherRow()));
-$("addBarkDeviceKey").addEventListener("click", () => $("barkDeviceKeys").appendChild(barkDeviceRow()));
+$("addTelegramRecipient").addEventListener("click", () => {
+  $("telegramRecipients").appendChild(recipientRow());
+  showToast("已新增 Telegram 接收聊天");
+});
+$("addWxpusherRecipient").addEventListener("click", () => {
+  $("wxpusherRecipients").appendChild(wxpusherRow());
+  showToast("已新增 WxPusher UID");
+});
+$("addBarkDeviceKey").addEventListener("click", () => {
+  $("barkDeviceKeys").appendChild(barkDeviceRow());
+  showToast("已新增 Bark 设备码");
+});
 
 $("addGroup").addEventListener("click", async () => {
   const name = $("newGroupInput").value.trim();
@@ -1072,6 +1188,7 @@ $("importTargets").addEventListener("click", async () => {
   const targets = parseImportText($("bulkImportText").value);
   if (!targets.length) {
     $("bulkImportResult").textContent = "没有可导入的用户";
+    setStatus("没有可导入的用户", true);
     return;
   }
   try {
@@ -1086,6 +1203,7 @@ $("importTargets").addEventListener("click", async () => {
     const errorText = result.errors?.length ? `，失败 ${result.errors.length} 条` : "";
     $("bulkImportResult").textContent = `导入完成：新增 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped}${errorText}`;
     if (!result.errors?.length) $("bulkImportText").value = "";
+    setStatus($("bulkImportResult").textContent, Boolean(result.errors?.length));
   } catch (error) {
     $("bulkImportResult").textContent = error.message;
     setStatus(error.message, true);
@@ -1113,9 +1231,11 @@ $("resolveUser").addEventListener("click", async () => {
       <span>@${escapeHtml(payload.data.handle)}</span>
       <span>粉丝 ${Number(payload.data.followers || 0).toLocaleString()}</span>
     `;
+    setStatus(`已识别 @${payload.data.handle}`);
   } catch (error) {
     state.resolvedUser = null;
     $("resolvePreview").textContent = error.message;
+    setStatus(error.message, true);
   }
 });
 
@@ -1231,11 +1351,13 @@ $("projectMinCommon").addEventListener("change", async () => {
 $("eventPrev").addEventListener("click", () => {
   state.eventPage = Math.max(state.eventPage - 1, 1);
   renderEvents();
+  showToast(`已切换到第 ${state.eventPage} 页`);
 });
 
 $("eventNext").addEventListener("click", () => {
   state.eventPage += 1;
   renderEvents();
+  showToast(`已切换到第 ${state.eventPage} 页`);
 });
 
 $("pollAll").addEventListener("click", async () => {
