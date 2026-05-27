@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import twitter_cli.client as client_module
 
 from twitter_cli.client import (
     _best_chrome_target,
@@ -266,6 +267,37 @@ class TestUpdateFeaturesFromHtml:
 # ── TwitterClient._build_headers ─────────────────────────────────────────
 
 class TestBuildHeaders:
+    def test_client_transaction_can_be_disabled(self, monkeypatch):
+        monkeypatch.setenv("TWITTER_CLIENT_TRANSACTION", "0")
+        with patch("twitter_cli.client._get_cffi_session") as mock_session:
+            client = TwitterClient("token", "ct0", {"requestDelay": 0})
+
+        assert client._client_transaction is None
+        mock_session.assert_not_called()
+
+    def test_client_transaction_failure_uses_process_cooldown(self, monkeypatch):
+        monkeypatch.delenv("TWITTER_CLIENT_TRANSACTION", raising=False)
+        monkeypatch.setattr(client_module, "_ct_retry_after", 0.0)
+        monkeypatch.setattr(client_module, "_ct_failure_logged", False)
+        monkeypatch.setattr(TwitterClient, "_load_ct_cache", lambda self: False)
+
+        calls = []
+
+        class Session:
+            def get(self, *args, **kwargs):
+                raise TimeoutError("boom")
+
+        def fake_session():
+            calls.append("session")
+            return Session()
+
+        monkeypatch.setattr(client_module, "_get_cffi_session", fake_session)
+
+        TwitterClient("token", "ct0", {"requestDelay": 0})
+        TwitterClient("token", "ct0", {"requestDelay": 0})
+
+        assert calls == ["session"]
+
     @patch("twitter_cli.client._get_cffi_session")
     @patch("twitter_cli.client._gen_ct_headers", return_value={})
     def test_required_headers_present(self, mock_ct_headers, mock_session):

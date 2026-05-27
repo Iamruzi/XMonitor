@@ -77,6 +77,11 @@ function fmt(value) {
   return String(value).replace("T", " ").replace("Z", "");
 }
 
+function fmtCompact(value) {
+  if (!value) return "未记录";
+  return fmt(value).slice(0, 16);
+}
+
 function numberText(value) {
   return Number(value || 0).toLocaleString();
 }
@@ -409,8 +414,52 @@ async function loadEvents() {
 function targetBriefLabel(target) {
   const handle = target.handle || "unknown";
   const display = target.displayName || handle;
-  const prefix = target.remarkName ? `${target.remarkName}｜` : "";
-  return `${prefix}${display}（@${handle}）`;
+  const group = target.groupName || "未分组";
+  const prefix = [group, target.remarkName].filter(Boolean).join("｜");
+  return `${prefix ? `${prefix}｜` : ""}${display}（@${handle}）`;
+}
+
+function evidenceRows(followedBy) {
+  return (followedBy || []).map((target) => {
+    const handle = target.handle || "unknown";
+    const display = target.displayName || handle;
+    const group = target.groupName || "未分组";
+    const remark = target.remarkName || "无备注";
+    return `
+      <div class="evidence-row">
+        <span class="evidence-group">分组 ${escapeHtml(group)}</span>
+        <span class="evidence-remark">备注 ${escapeHtml(remark)}</span>
+        <strong>${escapeHtml(display)}</strong>
+        <a href="https://x.com/${escapeHtml(handle)}" target="_blank" rel="noreferrer">@${escapeHtml(handle)}</a>
+        <time>关注 ${escapeHtml(fmtCompact(target.firstSeenAt))}</time>
+      </div>
+    `;
+  }).join("");
+}
+
+function signalTags(project) {
+  return (project.discoverySignals || []).slice(0, 5).map((signal) => (
+    `<span class="project-tag signal">${escapeHtml(signal)}</span>`
+  )).join("");
+}
+
+function projectEvidenceText(project) {
+  return (project.followedBy || []).map((target) => [
+    target.groupName || "未分组",
+    target.remarkName || "",
+    target.displayName || "",
+    target.handle || "",
+    target.firstSeenAt || "",
+  ].join(" ")).join(" ");
+}
+
+function ageText(days) {
+  if (days === null || days === undefined || days === "") return "";
+  const value = Number(days);
+  if (!Number.isFinite(value)) return "";
+  if (value < 30) return `${value} 天账号`;
+  if (value < 365) return `${Math.floor(value / 30)} 个月账号`;
+  return `${Math.floor(value / 365)} 年账号`;
 }
 
 function miniProjectItem(project) {
@@ -555,7 +604,10 @@ function projectMatches(project) {
     project.summary,
     project.reason,
     project.category,
+    project.followerStage,
+    (project.discoverySignals || []).join(" "),
     followedBy,
+    projectEvidenceText(project),
   ].join(" ").toLowerCase().includes(keyword);
 }
 
@@ -564,10 +616,7 @@ function projectCard(project) {
   card.className = `project-card ${project.isProject ? "hot" : ""}`;
   const profileUrl = `https://x.com/${encodeURIComponent(project.handle || "")}`;
   const followedBy = project.followedBy || [];
-  const followerChips = followedBy.slice(0, 8).map((target) => (
-    `<span>${escapeHtml(targetBriefLabel(target))}</span>`
-  )).join("");
-  const more = followedBy.length > 8 ? `<span>+${followedBy.length - 8}</span>` : "";
+  const accountAge = ageText(project.accountAgeDays);
   card.innerHTML = `
     <div class="project-card-head">
       <div>
@@ -580,10 +629,14 @@ function projectCard(project) {
       <span class="project-tag ${project.isProject ? "hot" : ""}">${escapeHtml(project.category || "账号")}</span>
       ${project.verified ? '<span class="project-tag">已认证</span>' : ""}
       <span class="project-tag">粉丝 ${numberText(project.followers)}</span>
+      <span class="project-tag">早期分 ${Number(project.earlyScore || 0)}</span>
+      ${project.followerStage ? `<span class="project-tag">${escapeHtml(project.followerStage)}</span>` : ""}
+      ${accountAge ? `<span class="project-tag">${escapeHtml(accountAge)}</span>` : ""}
+      ${signalTags(project)}
     </div>
     <p>${escapeHtml(project.summary || "")}</p>
     <div class="project-reason">${escapeHtml(project.reason || "")}</div>
-    <div class="followed-by">${followerChips}${more}</div>
+    <div class="evidence-list">${evidenceRows(followedBy)}</div>
     ${project.url ? `<a class="project-url" href="${escapeHtml(project.url)}" target="_blank" rel="noreferrer">${escapeHtml(project.url)}</a>` : ""}
   `;
   return card;

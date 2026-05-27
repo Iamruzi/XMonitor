@@ -67,11 +67,14 @@ logger = logging.getLogger(__name__)
 _cffi_session = None
 _cffi_session_proxy = None  # type: Optional[str]
 _runtime_proxy = None  # type: Optional[str]
+_ct_retry_after = 0.0
+_ct_failure_logged = False
 
 TimelineInstructionGetter = Callable[[Any], Any]
 
 # Hard ceiling to prevent accidental massive fetches
 _ABSOLUTE_MAX_COUNT = 500
+_CT_FAILURE_COOLDOWN_SECONDS = 1800
 
 
 # ── Session management ───────────────────────────────────────────────────
@@ -118,6 +121,19 @@ def _current_proxy():
     if _runtime_proxy:
         return _runtime_proxy
     return os.environ.get("TWITTER_PROXY", "")
+
+
+def _env_flag_enabled(name, default=True):
+    # type: (str, bool) -> bool
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _client_transaction_enabled():
+    # type: () -> bool
+    return _env_flag_enabled("TWITTER_CLIENT_TRANSACTION", True)
 
 
 def _get_cffi_session():
@@ -1112,9 +1128,18 @@ class TwitterClient:
         Tries cache first (1h TTL), then fetches fresh data from x.com.
         Also attempts to extract live feature flags from JS bundles.
         """
+        global _ct_failure_logged, _ct_retry_after
+
+        if not _client_transaction_enabled():
+            logger.debug("ClientTransaction disabled by TWITTER_CLIENT_TRANSACTION")
+            return
         if self._ct_init_attempted:
             return
         self._ct_init_attempted = True
+        now = time.time()
+        if now < _ct_retry_after:
+            logger.debug("Skipping ClientTransaction init until cooldown expires")
+            return
 
         # Try loading from cache first
         if self._load_ct_cache():
@@ -1148,7 +1173,17 @@ class TwitterClient:
             # Save to cache for future use
             self._save_ct_cache(home_page.text, ondemand_file.text)
         except Exception as exc:
-            logger.warning("Failed to init ClientTransaction: %s", exc)
+            _ct_retry_after = time.time() + _CT_FAILURE_COOLDOWN_SECONDS
+            message = (
+                "ClientTransaction unavailable; continuing without "
+                "x-client-transaction-id for %ds: %s"
+                % (_CT_FAILURE_COOLDOWN_SECONDS, exc)
+            )
+            if _ct_failure_logged:
+                logger.debug(message)
+            else:
+                logger.warning(message)
+                _ct_failure_logged = True
 
     def _build_headers(self, url="", method="GET"):
         # type: (str, str) -> Dict[str, str]

@@ -242,11 +242,15 @@ def test_storage_builds_following_insights_from_shared_accounts(tmp_path) -> Non
     assert insights["projects"][0]["handle"] == "monad_xyz"
     assert insights["projects"][0]["commonCount"] == 3
     assert insights["projects"][0]["isProject"] is True
+    assert insights["projects"][0]["earlyScore"] > 0
+    assert "discoverySignals" in insights["projects"][0]
     assert {target["handle"] for target in insights["projects"][0]["followedBy"]} == {
         "alice",
         "bob",
         "carol",
     }
+    followed_by = insights["projects"][0]["followedBy"][0]
+    assert set(followed_by) >= {"groupName", "remarkName", "handle", "displayName", "firstSeenAt"}
     alpha = next(group for group in insights["groups"] if group["name"] == "alpha猎手")
     assert alpha["targetCount"] == 2
     assert alpha["sharedAccounts"] == 2

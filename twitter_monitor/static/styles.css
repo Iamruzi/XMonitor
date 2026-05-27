@@ -737,7 +737,7 @@ a {
 
 .project-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, minmax(360px, 1fr));
   gap: 10px;
   min-height: 0;
   overflow-y: auto;
@@ -806,6 +806,11 @@ a {
   color: var(--amber);
 }
 
+.project-tag.signal {
+  background: #eaf6ef;
+  color: #24734f;
+}
+
 .project-card p,
 .project-reason,
 .project-url {
@@ -828,6 +833,44 @@ a {
   color: #475467;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.evidence-list {
+  display: grid;
+  gap: 6px;
+}
+
+.evidence-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.7fr) minmax(72px, 0.8fr) minmax(92px, 1fr) minmax(78px, 0.8fr) 116px;
+  gap: 6px;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid #e4e9f0;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.evidence-row span,
+.evidence-row strong,
+.evidence-row a,
+.evidence-row time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-group,
+.evidence-remark,
+.evidence-row time {
+  color: var(--muted);
+}
+
+.evidence-row strong {
+  color: var(--ink);
 }
 
 .project-empty {
@@ -1134,5 +1177,18 @@ a {
 
   .actionbar {
     grid-template-columns: 1fr;
+  }
+
+  .evidence-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .evidence-row strong,
+  .evidence-row a {
+    white-space: normal;
+  }
+
+  .evidence-row time {
+    grid-column: 1 / -1;
   }
 }

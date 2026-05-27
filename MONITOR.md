@@ -84,6 +84,8 @@ WxPusher 的标题摘要会包含分组、备注名和用户名，手机通知�
 
 项目雷达会在每次关注检查时保存被关注账号的 X 资料，包括用户名、显示名、简介、主页、粉丝数和认证状态。
 页面会根据简介里的协议、链、DeFi、AI、钱包、官方、基金会等线索标记疑似项目，也会把明显个人/KOL 线索降权。
+每个项目卡会展开共同关注证据，标出关注来源的分组、备注名、用户名和首次发现关注时间，并给出早期分、粉丝阶段、
+跨组共识、近期集中关注等信号，帮助优先看低粉但被多个观察对象同时关注的项目。
 这是基于已采集数据的启发式识别；没有资料的历史关注、纯用户 ID 和明显个人账号不会进入项目雷达，
 等下一轮关注检查再次抓到资料后会自动重新判断。
 
@@ -215,6 +217,7 @@ $env:MONITOR_TG_COMMANDS="false"
 | `TWITTER_AUTH_TOKEN` | 是 | | X/Twitter 的 `auth_token` Cookie |
 | `TWITTER_CT0` | 是 | | X/Twitter 的 `ct0` Cookie |
 | `TWITTER_PROXY` | 否 | | 访问 X/Twitter 的代理 |
+| `TWITTER_CLIENT_TRANSACTION` | 否 | `true` | 是否尝试生成 `x-client-transaction-id`，服务器首页提取失败时可设为 `false` |
 | `TELEGRAM_BOT_TOKEN` | 否 | | Telegram Bot Token，也可在页面配置 |
 | `TELEGRAM_CHAT_ID` | 否 | | 接收 Telegram 消息的 Chat ID，也可在页面配置 |
 | `TELEGRAM_PROXY` | 否 | `TWITTER_PROXY` | Telegram 通知代理 |

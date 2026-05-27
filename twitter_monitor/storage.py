@@ -7,7 +7,7 @@ import os
 import re
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -1042,6 +1042,17 @@ class MonitorStorage:
                 str(item.get("handle") or ""),
             ),
         )
+        discovery = self._project_discovery_signal(
+            common_count=len(followed_by),
+            followed_by=followed_by,
+            followers_count=followers_count,
+            project_score=int(signal.get("projectScore") or 0),
+            verified=bool(profile.get("verified")),
+            url=url,
+            profile_created_at=str(profile.get("profile_created_at") or ""),
+            first_seen_at=first_seen_at,
+            last_seen_at=last_seen_at,
+        )
         return {
             "userId": user_id,
             "handle": handle,
@@ -1063,6 +1074,7 @@ class MonitorStorage:
             "commonCount": len(followed_by),
             "followedBy": followed_by,
             "groupNames": sorted({str(item.get("groupName") or "") for item in followed_by if item.get("groupName")}),
+            **discovery,
             **signal,
         }
 
@@ -1094,10 +1106,92 @@ class MonitorStorage:
         return (
             -int(account.get("commonCount") or 0),
             -int(bool(account.get("isProject"))),
+            -int(account.get("earlyScore") or 0),
             -int(account.get("projectScore") or 0),
-            -int(account.get("followers") or 0),
+            int(account.get("followers") or 0),
             str(account.get("handle") or ""),
         )
+
+    def _project_discovery_signal(
+        self,
+        *,
+        common_count: int,
+        followed_by: list[dict[str, Any]],
+        followers_count: int,
+        project_score: int,
+        verified: bool,
+        url: str,
+        profile_created_at: str,
+        first_seen_at: str,
+        last_seen_at: str,
+    ) -> dict[str, Any]:
+        group_names = {
+            str(item.get("groupName") or "未分组")
+            for item in followed_by
+        }
+        now = datetime.now(timezone.utc)
+        recent_24h = 0
+        recent_7d = 0
+        for item in followed_by:
+            seen_at = self._parse_timestamp(str(item.get("firstSeenAt") or ""))
+            if not seen_at:
+                continue
+            if seen_at >= now - timedelta(days=1):
+                recent_24h += 1
+            if seen_at >= now - timedelta(days=7):
+                recent_7d += 1
+
+        account_created_at = self._parse_timestamp(profile_created_at)
+        account_age_days = (now - account_created_at).days if account_created_at else None
+        early_score = common_count * 18 + min(len(group_names), 4) * 12 + project_score * 7
+        signals = []
+        if followers_count <= 0:
+            follower_stage = "待补资料"
+        elif followers_count < 10_000:
+            follower_stage = "低粉早期"
+            early_score += 28
+            signals.append("低粉早期")
+        elif followers_count < 50_000:
+            follower_stage = "成长前段"
+            early_score += 18
+            signals.append("成长前段")
+        elif followers_count < 200_000:
+            follower_stage = "扩散中"
+            early_score += 8
+        else:
+            follower_stage = "成熟项目"
+            early_score -= 10
+        if len(group_names) >= 2:
+            early_score += 18
+            signals.append("跨组共识")
+        if recent_24h >= 2:
+            early_score += 22
+            signals.append("24h 集中关注")
+        elif recent_7d >= 2:
+            early_score += 12
+            signals.append("7天内升温")
+        if account_age_days is not None and account_age_days <= 365:
+            early_score += 14
+            signals.append("新账号")
+        if url:
+            early_score += 5
+            signals.append("官网线索")
+        if verified:
+            early_score -= 4
+        if not signals:
+            signals.append("共同关注")
+
+        return {
+            "earlyScore": max(early_score, 0),
+            "followerStage": follower_stage,
+            "groupCount": len(group_names),
+            "recentFollowCount24h": recent_24h,
+            "recentFollowCount7d": recent_7d,
+            "accountAgeDays": account_age_days,
+            "discoverySignals": signals[:5],
+            "firstSeenAt": first_seen_at,
+            "lastSeenAt": last_seen_at,
+        }
 
     def _project_signal(
         self,
@@ -1188,6 +1282,22 @@ class MonitorStorage:
         if url:
             return "已采集主页：%s" % url
         return "还没有采集到简介，等待下一轮关注检查补全。"
+
+    def _parse_timestamp(self, value: str) -> datetime | None:
+        value = str(value or "").strip()
+        if not value:
+            return None
+        normalized = value.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            try:
+                parsed = datetime.strptime(value, "%a %b %d %H:%M:%S %z %Y")
+            except ValueError:
+                return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     def _get_event_row(self, conn: sqlite3.Connection, event_id: int) -> sqlite3.Row | None:
         return conn.execute(
