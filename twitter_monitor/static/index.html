@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>X 用户监控台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260525-3" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260527-1" />
   </head>
   <body>
     <main id="loginView" class="login-view">
@@ -32,7 +32,9 @@
           <h1>监控工作台</h1>
         </div>
         <nav class="main-tabs" aria-label="页面">
-          <button class="active" type="button">监控与事件</button>
+          <button class="active" data-view="overview" type="button">总览</button>
+          <button data-view="groups" type="button">按分组</button>
+          <button data-view="projects" type="button">项目雷达</button>
         </nav>
         <div class="top-actions">
           <button id="openSettings" type="button">设置</button>
@@ -40,133 +42,222 @@
         </div>
       </header>
 
-      <section class="status-grid" aria-label="监控总览">
-        <article>
-          <span>监控用户</span>
-          <strong id="metricTargets">0</strong>
-        </article>
-        <article>
-          <span>运行中</span>
-          <strong id="metricEnabled">0</strong>
-        </article>
-        <article>
-          <span>发现事件</span>
-          <strong id="metricEvents">0</strong>
-        </article>
-        <article>
-          <span>通知状态</span>
-          <strong id="metricTelegram">未配置</strong>
-        </article>
-        <article>
-          <span>后台检查</span>
-          <strong id="pollWindow">180-300 秒随机</strong>
-        </article>
-        <article>
-          <span>下一轮倒计时</span>
-          <strong id="nextPoll">计算中</strong>
-        </article>
-      </section>
+      <section id="overviewView" class="view-pane">
+        <section class="status-grid" aria-label="监控总览">
+          <article>
+            <span>监控用户</span>
+            <strong id="metricTargets">0</strong>
+          </article>
+          <article>
+            <span>运行中</span>
+            <strong id="metricEnabled">0</strong>
+          </article>
+          <article>
+            <span>发现事件</span>
+            <strong id="metricEvents">0</strong>
+          </article>
+          <article>
+            <span>通知状态</span>
+            <strong id="metricTelegram">未配置</strong>
+          </article>
+          <article>
+            <span>后台检查</span>
+            <strong id="pollWindow">180-300 秒随机</strong>
+          </article>
+          <article>
+            <span>下一轮倒计时</span>
+            <strong id="nextPoll">计算中</strong>
+          </article>
+        </section>
 
-      <section class="actionbar">
-        <form id="addTargetForm" class="add-user-bar">
-          <label>
-            <span>X 用户名</span>
-            <input id="handleInput" type="text" placeholder="输入 X 用户名，例如 SkyAAmen" autocomplete="off" required />
-          </label>
-          <label>
-            <span>分组</span>
-            <input id="groupInput" type="text" list="groupOptions" placeholder="例如 alpha猎手" autocomplete="off" />
-          </label>
-          <label>
-            <span>备注名</span>
-            <input id="remarkInput" type="text" placeholder="例如 wx好友流星" autocomplete="off" />
-          </label>
-          <button id="resolveUser" type="button">识别用户</button>
-          <button class="primary" type="submit">添加</button>
-        </form>
-        <div id="resolvePreview" class="resolve-preview">还未识别用户</div>
-        <div class="actionbar-buttons">
-          <button id="pollAll" class="primary" type="button">立即检查全部</button>
-          <button id="refresh" type="button">刷新</button>
-        </div>
-      </section>
-
-      <section class="main-workspace">
-        <section class="panel user-panel">
-          <div class="panel-head">
-            <div>
-              <h2>监控用户</h2>
-              <p>像表格一样逐行管理用户、行为和状态</p>
-            </div>
-            <span id="targetCount" class="badge neutral">0 个</span>
-          </div>
-          <div class="table-wrap">
-            <table class="target-table">
-              <thead>
-                <tr>
-                  <th>用户</th>
-                  <th>分组</th>
-                  <th>备注名</th>
-                  <th>用户名</th>
-                  <th>状态</th>
-                  <th>原创</th>
-                  <th>转推</th>
-                  <th>回复</th>
-                  <th>关注</th>
-                  <th>推文数</th>
-                  <th>关注数</th>
-                  <th>上次检查</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="targetsTableBody"></tbody>
-            </table>
+        <section class="actionbar">
+          <form id="addTargetForm" class="add-user-bar">
+            <label>
+              <span>X 用户名</span>
+              <input id="handleInput" type="text" placeholder="输入 X 用户名，例如 SkyAAmen" autocomplete="off" required />
+            </label>
+            <label>
+              <span>分组</span>
+              <input id="groupInput" type="text" list="groupOptions" placeholder="例如 alpha猎手" autocomplete="off" />
+            </label>
+            <label>
+              <span>备注名</span>
+              <input id="remarkInput" type="text" placeholder="例如 wx好友流星" autocomplete="off" />
+            </label>
+            <button id="resolveUser" type="button">识别用户</button>
+            <button class="primary" type="submit">添加</button>
+          </form>
+          <div id="resolvePreview" class="resolve-preview">还未识别用户</div>
+          <div class="actionbar-buttons">
+            <button id="pollAll" class="primary" type="button">立即检查全部</button>
+            <button id="refresh" type="button">刷新</button>
           </div>
         </section>
 
-        <section class="panel event-panel">
+        <section class="main-workspace">
+          <section class="panel user-panel">
+            <div class="panel-head">
+              <div>
+                <h2>监控用户</h2>
+                <p>像表格一样逐行管理用户、行为和状态</p>
+              </div>
+              <span id="targetCount" class="badge neutral">0 个</span>
+            </div>
+            <div class="table-wrap">
+              <table class="target-table">
+                <thead>
+                  <tr>
+                    <th>用户</th>
+                    <th>分组</th>
+                    <th>备注名</th>
+                    <th>用户名</th>
+                    <th>状态</th>
+                    <th>原创</th>
+                    <th>转推</th>
+                    <th>回复</th>
+                    <th>关注</th>
+                    <th>推文数</th>
+                    <th>关注数</th>
+                    <th>上次检查</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="targetsTableBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel event-panel">
+            <div class="panel-head">
+              <div>
+                <h2>事件中心</h2>
+                <p>按分组、用户、类型和通知状态筛选</p>
+              </div>
+              <span id="eventCount" class="badge">0 条</span>
+            </div>
+            <div class="event-filters">
+              <label>
+                <span>分组</span>
+                <select id="eventGroupFilter"></select>
+              </label>
+              <label>
+                <span>监控用户</span>
+                <select id="eventTargetFilter"></select>
+              </label>
+              <label>
+                <span>事件类型</span>
+                <select id="eventTypeFilter"></select>
+              </label>
+              <label>
+                <span>通知状态</span>
+                <select id="eventNotifyFilter">
+                  <option value="all">全部</option>
+                  <option value="notified">已通知</option>
+                  <option value="pending">未通知</option>
+                  <option value="error">异常</option>
+                </select>
+              </label>
+              <label>
+                <span>关键词</span>
+                <input id="eventSearch" type="search" placeholder="搜索标题或内容" />
+              </label>
+            </div>
+            <div class="event-list-wrap">
+              <div id="eventsList" class="events-list"></div>
+            </div>
+            <div class="pager">
+              <button id="eventPrev" type="button">上一页</button>
+              <span id="eventPageInfo">第 1 页</span>
+              <button id="eventNext" type="button">下一页</button>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section id="groupsView" class="view-pane hidden">
+        <section class="group-workspace">
+          <section class="panel group-browser-panel">
+            <div class="panel-head">
+              <div>
+                <h2>分组视图</h2>
+                <p>点击分组查看组内监控用户和共同关注</p>
+              </div>
+              <span id="groupInsightCount" class="badge neutral">0 组</span>
+            </div>
+            <div id="groupCards" class="group-cards"></div>
+          </section>
+
+          <section class="panel group-detail-panel">
+            <div class="panel-head">
+              <div>
+                <h2 id="groupDetailTitle">选择分组</h2>
+                <p id="groupDetailMeta">查看这个分组监控的用户和热门关注对象</p>
+              </div>
+              <button id="groupDetailEvents" type="button">看事件</button>
+            </div>
+            <div class="group-detail-grid">
+              <section>
+                <h3>组内用户</h3>
+                <div id="groupDetailMembers" class="member-list"></div>
+              </section>
+              <section>
+                <h3>共同关注</h3>
+                <div id="groupDetailProjects" class="mini-project-list"></div>
+              </section>
+            </div>
+          </section>
+        </section>
+      </section>
+
+      <section id="projectsView" class="view-pane hidden">
+        <section class="project-hero" aria-label="项目雷达总览">
+          <article>
+            <span>已采集关注账号</span>
+            <strong id="insightFollowedAccounts">0</strong>
+          </article>
+          <article>
+            <span>有资料账号</span>
+            <strong id="insightProfiledAccounts">0</strong>
+          </article>
+          <article>
+            <span>共同关注</span>
+            <strong id="insightSharedAccounts">0</strong>
+          </article>
+          <article class="hot">
+            <span>疑似项目</span>
+            <strong id="insightProjectAccounts">0</strong>
+          </article>
+        </section>
+
+        <section class="panel project-radar-panel">
           <div class="panel-head">
             <div>
-              <h2>事件中心</h2>
-              <p>按分组、用户、类型和通知状态筛选</p>
+              <h2>项目雷达</h2>
+              <p>从监控用户的关注对象里找出被多人关注的项目和账号</p>
             </div>
-            <span id="eventCount" class="badge">0 条</span>
+            <span id="projectCount" class="badge">0 个</span>
           </div>
-          <div class="event-filters">
+          <div class="project-filters">
             <label>
               <span>分组</span>
-              <select id="eventGroupFilter"></select>
-            </label>
-            <label>
-              <span>监控用户</span>
-              <select id="eventTargetFilter"></select>
-            </label>
-            <label>
-              <span>事件类型</span>
-              <select id="eventTypeFilter"></select>
-            </label>
-            <label>
-              <span>通知状态</span>
-              <select id="eventNotifyFilter">
-                <option value="all">全部</option>
-                <option value="notified">已通知</option>
-                <option value="pending">未通知</option>
-                <option value="error">异常</option>
+              <select id="projectGroupFilter">
+                <option value="">全部分组</option>
               </select>
             </label>
             <label>
+              <span>至少共同关注</span>
+              <input id="projectMinCommon" type="number" min="2" max="20" value="2" />
+            </label>
+            <label>
               <span>关键词</span>
-              <input id="eventSearch" type="search" placeholder="搜索标题或内容" />
+              <input id="projectSearch" type="search" placeholder="搜索项目、简介、关注来源" />
+            </label>
+            <label class="inline-check project-only">
+              <input id="projectOnly" type="checkbox" checked disabled />
+              <span>只看共同项目</span>
             </label>
           </div>
-          <div class="event-list-wrap">
-            <div id="eventsList" class="events-list"></div>
-          </div>
-          <div class="pager">
-            <button id="eventPrev" type="button">上一页</button>
-            <span id="eventPageInfo">第 1 页</span>
-            <button id="eventNext" type="button">下一页</button>
-          </div>
+          <div id="projectsList" class="project-grid"></div>
         </section>
       </section>
 
@@ -361,6 +452,6 @@
       <option value="silence"></option>
       <option value="telegraph"></option>
     </datalist>
-    <script src="/static/app.js?v=20260526-1"></script>
+    <script src="/static/app.js?v=20260527-1"></script>
   </body>
 </html>

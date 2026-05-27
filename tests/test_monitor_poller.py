@@ -91,6 +91,9 @@ def test_first_poll_snapshots_without_notifications(tmp_path) -> None:
     assert result["newFollowing"] == 0
     assert set(result["snapshotted"]) == {"tweets", "following"}
     assert notifier.sent == 0
+    insights = storage.following_insights(min_common=1)
+    assert insights["summary"]["profiledAccounts"] == 1
+    assert insights["projects"] == []
 
 
 def test_second_poll_creates_events_for_new_items(tmp_path) -> None:

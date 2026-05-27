@@ -179,6 +179,7 @@ class MonitorPoller:
         users = client.fetch_following(user_id, count)
         user_ids = [user.id for user in users if user.id]
         known_ids = self.storage.get_seen_following_ids(target_id, user_ids)
+        self.storage.upsert_followed_users(users)
         self.storage.add_seen_following(target_id, user_ids)
 
         if not target.get("following_initialized"):

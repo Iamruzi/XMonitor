@@ -228,30 +228,39 @@ def _iter_chrome_cookie_files(browser_name: str) -> List[str]:
     if base_dir is None:
         return []
 
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    roots: List[str] = []
     if sys.platform == "darwin":
-        root = os.path.join(os.path.expanduser("~"), "Library", "Application Support", base_dir)
+        roots.append(os.path.join(home, "Library", "Application Support", base_dir))
     elif sys.platform == "win32":
         if browser_name == "edge":
-            root = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Edge", "User Data")
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Edge", "User Data"))
+        elif browser_name in {"chrome", "brave"}:
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir, "User Data"))
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir))
         else:
-            root = os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir)
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir))
+        roots.append(os.path.join(home, ".config", base_dir))
     else:
         if browser_name == "edge":
-            root = os.path.join(os.path.expanduser("~"), ".config", "microsoft-edge")
+            roots.append(os.path.join(home, ".config", "microsoft-edge"))
         else:
-            root = os.path.join(os.path.expanduser("~"), ".config", base_dir)
-
-    if not os.path.isdir(root):
-        return []
+            roots.append(os.path.join(home, ".config", base_dir))
 
     # If user explicitly specifies a profile, only use that one
     env_profile = os.environ.get("TWITTER_CHROME_PROFILE", "").strip()
     if env_profile:
-        cookie_path = os.path.join(root, env_profile, "Cookies")
-        if os.path.exists(cookie_path):
-            logger.debug("Using specified Chrome profile: %s", env_profile)
-            return [cookie_path]
+        for root in roots:
+            cookie_path = os.path.join(root, env_profile, "Cookies")
+            if os.path.exists(cookie_path):
+                logger.debug("Using specified Chrome profile: %s", env_profile)
+                return _normalize_cookie_paths([cookie_path])
+        cookie_path = os.path.join(roots[0] if roots else "", env_profile, "Cookies")
         logger.warning("TWITTER_CHROME_PROFILE='%s' not found at %s", env_profile, cookie_path)
+        return []
+
+    root = next((path for path in roots if os.path.isdir(path)), roots[0] if roots else "")
+    if not os.path.isdir(root):
         return []
 
     # Auto-discover: Default first, then Profile N sorted
@@ -266,7 +275,13 @@ def _iter_chrome_cookie_files(browser_name: str) -> List[str]:
         if os.path.exists(cookie_file):
             paths.append(cookie_file)
 
-    return paths
+    return _normalize_cookie_paths(paths)
+
+
+def _normalize_cookie_paths(paths: List[str]) -> List[str]:
+    if sys.platform == "win32":
+        return paths
+    return [path.replace(os.sep, "/") for path in paths]
 
 
 def _extract_in_process() -> Tuple[Optional[Dict[str, str]], List[str]]:
@@ -375,24 +390,34 @@ def iter_cookie_files(browser_name):
     base_dir = CHROMIUM_BASE_DIRS.get(browser_name)
     if base_dir is None:
         return []
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    roots = []
     if sys.platform == "darwin":
-        root = os.path.join(os.path.expanduser("~"), "Library", "Application Support", base_dir)
+        roots.append(os.path.join(home, "Library", "Application Support", base_dir))
     elif sys.platform == "win32":
         if browser_name == "edge":
-            root = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Edge", "User Data")
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Edge", "User Data"))
+        elif browser_name in {"chrome", "brave"}:
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir, "User Data"))
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir))
         else:
-            root = os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir)
+            roots.append(os.path.join(os.environ.get("LOCALAPPDATA", ""), base_dir))
+        roots.append(os.path.join(home, ".config", base_dir))
     else:
         if browser_name == "edge":
-            root = os.path.join(os.path.expanduser("~"), ".config", "microsoft-edge")
+            roots.append(os.path.join(home, ".config", "microsoft-edge"))
         else:
-            root = os.path.join(os.path.expanduser("~"), ".config", base_dir)
-    if not os.path.isdir(root):
-        return []
+            roots.append(os.path.join(home, ".config", base_dir))
     env_profile = os.environ.get("TWITTER_CHROME_PROFILE", "").strip()
     if env_profile:
-        p = os.path.join(root, env_profile, "Cookies")
-        return [p] if os.path.exists(p) else []
+        for root in roots:
+            p = os.path.join(root, env_profile, "Cookies")
+            if os.path.exists(p):
+                return [p]
+        return []
+    root = next((path for path in roots if os.path.isdir(path)), roots[0] if roots else "")
+    if not os.path.isdir(root):
+        return []
     paths = []
     d = os.path.join(root, "Default", "Cookies")
     if os.path.exists(d):

@@ -358,6 +358,17 @@ def list_groups() -> dict[str, Any]:
     return {"data": storage.list_groups()}
 
 
+@app.get("/api/following-insights", dependencies=[Depends(require_admin)])
+def following_insights(group: str = "", min_common: int = 2, limit: int = 80) -> dict[str, Any]:
+    return {
+        "data": storage.following_insights(
+            group_name=group,
+            min_common=min_common,
+            limit=limit,
+        )
+    }
+
+
 @app.post("/api/groups", dependencies=[Depends(require_admin)])
 def add_group(payload: GroupCreate) -> dict[str, Any]:
     try:

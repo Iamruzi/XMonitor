@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -21,6 +22,156 @@ def normalize_handle(handle: str) -> str:
     if any(char.isspace() for char in cleaned):
         raise ValueError("用户名不能包含空格")
     return cleaned
+
+
+PROJECT_KEYWORD_GROUPS = {
+    "公链/协议": (
+        "protocol",
+        "network",
+        "chain",
+        "blockchain",
+        "layer 1",
+        "layer1",
+        "layer 2",
+        "layer2",
+        "l1",
+        "l2",
+        "rollup",
+        "mainnet",
+        "testnet",
+        "zk",
+        "evm",
+    ),
+    "DeFi/交易": (
+        "defi",
+        "dex",
+        "exchange",
+        "swap",
+        "staking",
+        "liquidity",
+        "yield",
+        "lending",
+        "perp",
+        "oracle",
+    ),
+    "AI/Web3": (
+        "ai",
+        "agent",
+        "agents",
+        "web3",
+        "crypto",
+        "onchain",
+        "wallet",
+        "infrastructure",
+        "infra",
+        "dapp",
+        "dao",
+        "ecosystem",
+    ),
+    "NFT/GameFi": (
+        "nft",
+        "gamefi",
+        "gaming",
+        "metaverse",
+        "collectibles",
+    ),
+}
+
+PROJECT_HINTS = (
+    "official",
+    "foundation",
+    "labs",
+    "lab",
+    "studio",
+    "build",
+    "powered by",
+    "token",
+    "airdrop",
+    "launchpad",
+    "社区",
+    "官方",
+    "协议",
+    "生态",
+    "链",
+    "钱包",
+    "交易所",
+)
+
+STRONG_PROJECT_TERMS = {
+    "protocol",
+    "network",
+    "blockchain",
+    "layer 1",
+    "layer1",
+    "layer 2",
+    "layer2",
+    "rollup",
+    "mainnet",
+    "testnet",
+    "evm",
+    "dex",
+    "exchange",
+    "swap",
+    "staking",
+    "liquidity",
+    "yield",
+    "lending",
+    "perp",
+    "perps",
+    "oracle",
+    "onchain",
+    "on-chain",
+    "wallet",
+    "dapp",
+    "dao",
+    "foundation",
+    "official",
+    "launchpad",
+    "协议",
+    "官方",
+    "交易所",
+    "钱包",
+}
+
+HANDLE_PROJECT_TERMS = {
+    "protocol",
+    "foundation",
+    "labs",
+    "network",
+    "chain",
+    "wallet",
+    "exchange",
+    "dex",
+    "dao",
+    "defi",
+    "app",
+}
+
+PERSON_HINTS = (
+    "founder",
+    "co-founder",
+    "investor",
+    "angel",
+    "researcher",
+    "engineer",
+    "developer",
+    "writer",
+    "content creator",
+    "kol",
+    "ambassador",
+    "trader",
+    "partner",
+    "advisor",
+    "my views",
+    "opinions",
+    "not financial advice",
+    "交易员",
+    "猎手",
+    "撸毛",
+    "个人",
+    "非投资建议",
+    "邀请码",
+)
 
 
 class MonitorStorage:
@@ -71,6 +222,27 @@ class MonitorStorage:
                     PRIMARY KEY (target_id, user_id),
                     FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
                 );
+                CREATE INDEX IF NOT EXISTS idx_seen_following_user_id ON seen_following(user_id);
+                CREATE TABLE IF NOT EXISTS followed_users (
+                    user_id TEXT PRIMARY KEY,
+                    screen_name TEXT NOT NULL DEFAULT '',
+                    name TEXT NOT NULL DEFAULT '',
+                    bio TEXT NOT NULL DEFAULT '',
+                    location TEXT NOT NULL DEFAULT '',
+                    url TEXT NOT NULL DEFAULT '',
+                    followers_count INTEGER NOT NULL DEFAULT 0,
+                    following_count INTEGER NOT NULL DEFAULT 0,
+                    tweets_count INTEGER NOT NULL DEFAULT 0,
+                    likes_count INTEGER NOT NULL DEFAULT 0,
+                    verified INTEGER NOT NULL DEFAULT 0,
+                    profile_image_url TEXT NOT NULL DEFAULT '',
+                    profile_created_at TEXT NOT NULL DEFAULT '',
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_followed_users_screen_name
+                    ON followed_users(screen_name COLLATE NOCASE);
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     target_id INTEGER NOT NULL,
@@ -107,6 +279,43 @@ class MonitorStorage:
         for column, statement in migrations.items():
             if column not in target_columns:
                 conn.execute(statement)
+        self._backfill_followed_users_from_events(conn)
+
+    def _backfill_followed_users_from_events(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            SELECT external_id, title, body, url, detected_at, payload_json
+            FROM events
+            WHERE event_type = 'following'
+            """
+        ).fetchall()
+        profile_rows = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except (TypeError, ValueError):
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            profile_rows.append(
+                self._followed_user_profile_row(
+                    user_id=str(payload.get("id") or row["external_id"] or ""),
+                    screen_name=str(payload.get("screenName") or self._handle_from_url(row["url"]) or ""),
+                    name=str(payload.get("name") or self._name_from_following_title(row["title"]) or ""),
+                    bio=str(payload.get("bio") or row["body"] or ""),
+                    location=str(payload.get("location") or ""),
+                    url=str(payload.get("url") or row["url"] or ""),
+                    followers_count=self._safe_int(payload.get("followers")),
+                    following_count=self._safe_int(payload.get("following")),
+                    tweets_count=self._safe_int(payload.get("tweets")),
+                    likes_count=self._safe_int(payload.get("likes")),
+                    verified=bool(payload.get("verified", False)),
+                    profile_image_url=str(payload.get("profileImageUrl") or ""),
+                    profile_created_at=str(payload.get("createdAt") or ""),
+                    seen_at=str(row["detected_at"] or utc_now()),
+                )
+            )
+        self._upsert_followed_user_rows(conn, profile_rows)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30)
@@ -426,6 +635,32 @@ class MonitorStorage:
     def add_seen_following(self, target_id: int, user_ids: list[str]) -> None:
         self._add_seen("seen_following", "user_id", target_id, user_ids)
 
+    def upsert_followed_users(self, users: list[Any]) -> None:
+        rows = []
+        for user in users:
+            rows.append(
+                self._followed_user_profile_row(
+                    user_id=str(getattr(user, "id", "") or ""),
+                    screen_name=str(getattr(user, "screen_name", "") or ""),
+                    name=str(getattr(user, "name", "") or ""),
+                    bio=str(getattr(user, "bio", "") or ""),
+                    location=str(getattr(user, "location", "") or ""),
+                    url=str(getattr(user, "url", "") or ""),
+                    followers_count=self._safe_int(getattr(user, "followers_count", 0)),
+                    following_count=self._safe_int(getattr(user, "following_count", 0)),
+                    tweets_count=self._safe_int(getattr(user, "tweets_count", 0)),
+                    likes_count=self._safe_int(getattr(user, "likes_count", 0)),
+                    verified=bool(getattr(user, "verified", False)),
+                    profile_image_url=str(getattr(user, "profile_image_url", "") or ""),
+                    profile_created_at=str(getattr(user, "created_at", "") or ""),
+                    seen_at=utc_now(),
+                )
+            )
+        if not rows:
+            return
+        with self._lock, self._connect() as conn:
+            self._upsert_followed_user_rows(conn, rows)
+
     def _add_seen(self, table: str, column: str, target_id: int, values: list[str]) -> None:
         rows = [(target_id, value, utc_now()) for value in values if value]
         if not rows:
@@ -435,6 +670,102 @@ class MonitorStorage:
                 "INSERT OR IGNORE INTO %s (target_id, %s, first_seen_at) VALUES (?, ?, ?)" % (table, column),
                 rows,
             )
+
+    def _followed_user_profile_row(
+        self,
+        *,
+        user_id: str,
+        screen_name: str,
+        name: str,
+        bio: str,
+        location: str,
+        url: str,
+        followers_count: int,
+        following_count: int,
+        tweets_count: int,
+        likes_count: int,
+        verified: bool,
+        profile_image_url: str,
+        profile_created_at: str,
+        seen_at: str,
+    ) -> tuple[Any, ...] | None:
+        user_id = str(user_id or "").strip()
+        if not user_id:
+            return None
+        return (
+            user_id,
+            self._clean_label(screen_name, limit=120),
+            self._clean_label(name, limit=160),
+            str(bio or "").strip()[:800],
+            self._clean_label(location, limit=160),
+            str(url or "").strip()[:500],
+            max(int(followers_count), 0),
+            max(int(following_count), 0),
+            max(int(tweets_count), 0),
+            max(int(likes_count), 0),
+            int(bool(verified)),
+            str(profile_image_url or "").strip()[:500],
+            str(profile_created_at or "").strip()[:120],
+            seen_at,
+            seen_at,
+            seen_at,
+        )
+
+    def _upsert_followed_user_rows(
+        self,
+        conn: sqlite3.Connection,
+        rows: list[tuple[Any, ...] | None],
+    ) -> None:
+        clean_rows = [row for row in rows if row is not None]
+        if not clean_rows:
+            return
+        conn.executemany(
+            """
+            INSERT INTO followed_users (
+                user_id, screen_name, name, bio, location, url,
+                followers_count, following_count, tweets_count, likes_count, verified,
+                profile_image_url, profile_created_at, first_seen_at, last_seen_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                screen_name = CASE
+                    WHEN excluded.screen_name != '' THEN excluded.screen_name
+                    ELSE followed_users.screen_name
+                END,
+                name = CASE
+                    WHEN excluded.name != '' THEN excluded.name
+                    ELSE followed_users.name
+                END,
+                bio = CASE
+                    WHEN excluded.bio != '' THEN excluded.bio
+                    ELSE followed_users.bio
+                END,
+                location = CASE
+                    WHEN excluded.location != '' THEN excluded.location
+                    ELSE followed_users.location
+                END,
+                url = CASE
+                    WHEN excluded.url != '' THEN excluded.url
+                    ELSE followed_users.url
+                END,
+                followers_count = excluded.followers_count,
+                following_count = excluded.following_count,
+                tweets_count = excluded.tweets_count,
+                likes_count = excluded.likes_count,
+                verified = excluded.verified,
+                profile_image_url = CASE
+                    WHEN excluded.profile_image_url != '' THEN excluded.profile_image_url
+                    ELSE followed_users.profile_image_url
+                END,
+                profile_created_at = CASE
+                    WHEN excluded.profile_created_at != '' THEN excluded.profile_created_at
+                    ELSE followed_users.profile_created_at
+                END,
+                last_seen_at = excluded.last_seen_at,
+                updated_at = excluded.updated_at
+            """,
+            clean_rows,
+        )
 
     def create_event(
         self,
@@ -504,6 +835,360 @@ class MonitorStorage:
             ).fetchall()
         return [self._row_to_dict(row) or {} for row in rows]
 
+    def following_insights(
+        self,
+        *,
+        group_name: str = "",
+        min_common: int = 2,
+        limit: int = 80,
+    ) -> dict[str, Any]:
+        selected_group = self._clean_label(group_name)
+        min_common = max(int(min_common), 2)
+        limit = max(min(int(limit), 200), 1)
+        with self._connect() as conn:
+            target_rows = conn.execute(
+                """
+                SELECT id, handle, display_name, group_name, remark_name, enabled,
+                       following_initialized, last_checked_at, last_error
+                FROM targets
+                ORDER BY group_name ASC, created_at DESC
+                """
+            ).fetchall()
+            relation_rows = conn.execute(
+                """
+                SELECT seen_following.user_id,
+                       seen_following.first_seen_at,
+                       targets.id AS target_id,
+                       targets.handle AS target_handle,
+                       targets.display_name AS target_display_name,
+                       targets.group_name AS target_group_name,
+                       targets.remark_name AS target_remark_name,
+                       targets.enabled AS target_enabled
+                FROM seen_following
+                JOIN targets ON targets.id = seen_following.target_id
+                ORDER BY seen_following.first_seen_at DESC
+                """
+            ).fetchall()
+            profile_rows = conn.execute("SELECT * FROM followed_users").fetchall()
+
+        targets = [self._row_to_dict(row) or {} for row in target_rows]
+        profiles = {str(row["user_id"]): dict(row) for row in profile_rows}
+        visible_targets = [
+            target for target in targets
+            if not selected_group or str(target.get("group_name") or "") == selected_group
+        ]
+        visible_target_ids = {int(target["id"]) for target in visible_targets}
+        visible_relations = [
+            row for row in relation_rows
+            if not selected_group or int(row["target_id"]) in visible_target_ids
+        ]
+
+        accounts = self._account_cards_from_relations(visible_relations, profiles)
+        radar_projects = [
+            account for account in accounts
+            if account["commonCount"] >= min_common and account["isProject"]
+        ]
+        radar_projects.sort(key=self._account_sort_key)
+
+        group_cards = self._group_insight_cards(targets, relation_rows, profiles, min_common=min_common)
+        followed_accounts = len(accounts)
+        shared_accounts = sum(1 for account in accounts if account["commonCount"] >= 2)
+        project_accounts = len(radar_projects)
+        monitors_with_following = {
+            int(row["target_id"]) for row in visible_relations if int(row["target_id"]) in visible_target_ids
+        }
+        return {
+            "summary": {
+                "groupName": selected_group,
+                "monitoredUsers": len(visible_targets),
+                "monitorsWithFollowing": len(monitors_with_following),
+                "followedAccounts": followed_accounts,
+                "profiledAccounts": sum(1 for account in accounts if account["profiled"]),
+                "sharedAccounts": shared_accounts,
+                "projectAccounts": project_accounts,
+                "relationships": len(visible_relations),
+                "minCommon": min_common,
+                "generatedAt": utc_now(),
+            },
+            "groups": group_cards,
+            "projects": radar_projects[:limit],
+        }
+
+    def _account_cards_from_relations(
+        self,
+        relation_rows: list[sqlite3.Row],
+        profiles: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        followers_by_user: dict[str, list[dict[str, Any]]] = {}
+        first_seen: dict[str, str] = {}
+        last_seen: dict[str, str] = {}
+        for row in relation_rows:
+            user_id = str(row["user_id"] or "")
+            if not user_id:
+                continue
+            followers_by_user.setdefault(user_id, []).append(self._target_brief_from_relation(row))
+            seen_at = str(row["first_seen_at"] or "")
+            if seen_at and (not first_seen.get(user_id) or seen_at < first_seen[user_id]):
+                first_seen[user_id] = seen_at
+            if seen_at and (not last_seen.get(user_id) or seen_at > last_seen[user_id]):
+                last_seen[user_id] = seen_at
+        return [
+            self._followed_account_card(
+                user_id=user_id,
+                profile=profiles.get(user_id),
+                followed_by=followed_by,
+                first_seen_at=first_seen.get(user_id, ""),
+                last_seen_at=last_seen.get(user_id, ""),
+            )
+            for user_id, followed_by in followers_by_user.items()
+        ]
+
+    def _group_insight_cards(
+        self,
+        targets: list[dict[str, Any]],
+        relation_rows: list[sqlite3.Row],
+        profiles: dict[str, dict[str, Any]],
+        *,
+        min_common: int,
+    ) -> list[dict[str, Any]]:
+        groups: dict[str, dict[str, Any]] = {}
+        for name in self.get_saved_groups():
+            groups.setdefault(
+                name,
+                {
+                    "name": name,
+                    "targets": [],
+                    "enabledCount": 0,
+                    "relations": [],
+                },
+            )
+        for target in targets:
+            name = str(target.get("group_name") or "未分组")
+            group = groups.setdefault(
+                name,
+                {
+                    "name": name,
+                    "targets": [],
+                    "enabledCount": 0,
+                    "relations": [],
+                },
+            )
+            group["targets"].append(self._target_brief_from_target(target))
+            group["enabledCount"] += int(bool(target.get("enabled")))
+        for row in relation_rows:
+            name = str(row["target_group_name"] or "未分组")
+            group = groups.setdefault(
+                name,
+                {
+                    "name": name,
+                    "targets": [],
+                    "enabledCount": 0,
+                    "relations": [],
+                },
+            )
+            group["relations"].append(row)
+
+        cards = []
+        for name, group in groups.items():
+            accounts = self._account_cards_from_relations(group["relations"], profiles)
+            shared_projects = [
+                account for account in accounts
+                if account["commonCount"] >= min_common and account["isProject"]
+            ]
+            shared_projects.sort(key=self._account_sort_key)
+            cards.append(
+                {
+                    "name": name,
+                    "targetCount": len(group["targets"]),
+                    "enabledCount": int(group["enabledCount"]),
+                    "followingAccounts": len(accounts),
+                    "sharedAccounts": sum(1 for account in accounts if account["commonCount"] >= 2),
+                    "projectAccounts": len(shared_projects),
+                    "targets": group["targets"],
+                    "topProjects": shared_projects[:8],
+                }
+            )
+        return sorted(cards, key=lambda item: (-int(item["targetCount"]), str(item["name"])))
+
+    def _followed_account_card(
+        self,
+        *,
+        user_id: str,
+        profile: dict[str, Any] | None,
+        followed_by: list[dict[str, Any]],
+        first_seen_at: str,
+        last_seen_at: str,
+    ) -> dict[str, Any]:
+        profile = profile or {}
+        handle = str(profile.get("screen_name") or user_id)
+        name = str(profile.get("name") or handle)
+        bio = str(profile.get("bio") or "")
+        url = str(profile.get("url") or "")
+        followers_count = self._safe_int(profile.get("followers_count"))
+        signal = self._project_signal(
+            name=name,
+            handle=handle,
+            bio=bio,
+            url=url,
+            followers_count=followers_count,
+            verified=bool(profile.get("verified")),
+            profiled=bool(profile),
+        )
+        followed_by = sorted(
+            followed_by,
+            key=lambda item: (
+                str(item.get("groupName") or ""),
+                str(item.get("remarkName") or ""),
+                str(item.get("handle") or ""),
+            ),
+        )
+        return {
+            "userId": user_id,
+            "handle": handle,
+            "name": name,
+            "bio": bio,
+            "summary": self._project_summary(bio=bio, url=url),
+            "location": str(profile.get("location") or ""),
+            "url": url,
+            "followers": followers_count,
+            "following": self._safe_int(profile.get("following_count")),
+            "tweets": self._safe_int(profile.get("tweets_count")),
+            "verified": bool(profile.get("verified")),
+            "profileImageUrl": str(profile.get("profile_image_url") or ""),
+            "profileCreatedAt": str(profile.get("profile_created_at") or ""),
+            "firstSeenAt": first_seen_at,
+            "lastSeenAt": last_seen_at,
+            "lastProfileSeenAt": str(profile.get("last_seen_at") or ""),
+            "profiled": bool(profile),
+            "commonCount": len(followed_by),
+            "followedBy": followed_by,
+            "groupNames": sorted({str(item.get("groupName") or "") for item in followed_by if item.get("groupName")}),
+            **signal,
+        }
+
+    def _target_brief_from_target(self, target: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": int(target["id"]),
+            "handle": str(target.get("handle") or ""),
+            "displayName": str(target.get("display_name") or ""),
+            "groupName": str(target.get("group_name") or ""),
+            "remarkName": str(target.get("remark_name") or ""),
+            "enabled": bool(target.get("enabled")),
+            "followingInitialized": bool(target.get("following_initialized")),
+            "lastCheckedAt": str(target.get("last_checked_at") or ""),
+            "lastError": str(target.get("last_error") or ""),
+        }
+
+    def _target_brief_from_relation(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": int(row["target_id"]),
+            "handle": str(row["target_handle"] or ""),
+            "displayName": str(row["target_display_name"] or ""),
+            "groupName": str(row["target_group_name"] or ""),
+            "remarkName": str(row["target_remark_name"] or ""),
+            "enabled": bool(row["target_enabled"]),
+            "firstSeenAt": str(row["first_seen_at"] or ""),
+        }
+
+    def _account_sort_key(self, account: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            -int(account.get("commonCount") or 0),
+            -int(bool(account.get("isProject"))),
+            -int(account.get("projectScore") or 0),
+            -int(account.get("followers") or 0),
+            str(account.get("handle") or ""),
+        )
+
+    def _project_signal(
+        self,
+        *,
+        name: str,
+        handle: str,
+        bio: str,
+        url: str,
+        followers_count: int,
+        verified: bool,
+        profiled: bool,
+    ) -> dict[str, Any]:
+        if not profiled:
+            return {
+                "isProject": False,
+                "isUnresolved": True,
+                "isPersonal": False,
+                "category": "未识别账号",
+                "projectScore": 0,
+                "reason": "还没有采集到账号资料，不进入项目雷达",
+            }
+        if handle.isdigit() and not bio and not url:
+            return {
+                "isProject": False,
+                "isUnresolved": True,
+                "isPersonal": False,
+                "category": "未识别账号",
+                "projectScore": 0,
+                "reason": "只有用户 ID，没有项目资料，不进入项目雷达",
+            }
+        text = " ".join([name, handle, bio, url]).lower()
+        matched_terms = []
+        category = "账号"
+        for label, terms in PROJECT_KEYWORD_GROUPS.items():
+            hits = [term for term in terms if self._term_in_text(text, term)]
+            if hits:
+                category = label
+                matched_terms.extend(hits[:3])
+        hint_hits = [term for term in PROJECT_HINTS if self._term_in_text(text, term)]
+        person_hits = [term for term in PERSON_HINTS if self._term_in_text(text, term)]
+        score = len(set(matched_terms)) * 2 + len(set(hint_hits))
+        if verified:
+            score += 1
+        if url:
+            score += 1
+        if followers_count >= 50_000:
+            score += 1
+        if person_hits:
+            score = max(score - 4, 0)
+        all_hits = {*matched_terms, *hint_hits}
+        strong_hits = STRONG_PROJECT_TERMS.intersection(all_hits)
+        handle_hits = [term for term in HANDLE_PROJECT_TERMS if self._term_in_text(handle.lower(), term)]
+        if handle_hits:
+            score += 1
+        is_project = bool(strong_hits) and score >= 3 and not person_hits
+        if person_hits and len(strong_hits) >= 2 and score >= 7:
+            is_project = True
+        if is_project and category == "账号":
+            category = "项目/组织"
+        reasons = []
+        if matched_terms:
+            reasons.append("关键词：" + "、".join(sorted(set(matched_terms))[:4]))
+        if hint_hits:
+            reasons.append("线索：" + "、".join(sorted(set(hint_hits))[:3]))
+        if person_hits and not is_project:
+            reasons.append("更像个人账号：" + "、".join(sorted(set(person_hits))[:2]))
+        if not reasons:
+            reasons.append("未命中项目关键词，先按普通账号展示")
+        return {
+            "isProject": is_project,
+            "isUnresolved": False,
+            "isPersonal": bool(person_hits and not is_project),
+            "category": category,
+            "projectScore": score,
+            "reason": "；".join(reasons),
+        }
+
+    def _term_in_text(self, text: str, term: str) -> bool:
+        if term.isascii() and re.fullmatch(r"[a-z0-9][a-z0-9 +.-]*", term):
+            pattern = r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(term)
+            return re.search(pattern, text) is not None
+        return term in text
+
+    def _project_summary(self, *, bio: str, url: str) -> str:
+        bio = " ".join(str(bio or "").split())
+        if bio:
+            return bio[:220]
+        if url:
+            return "已采集主页：%s" % url
+        return "还没有采集到简介，等待下一轮关注检查补全。"
+
     def _get_event_row(self, conn: sqlite3.Connection, event_id: int) -> sqlite3.Row | None:
         return conn.execute(
             """
@@ -560,6 +1245,26 @@ class MonitorStorage:
         except ValueError:
             parsed = default
         return max(parsed, minimum)
+
+    def _safe_int(self, value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _handle_from_url(self, value: str) -> str:
+        url = str(value or "").strip().rstrip("/")
+        if not url:
+            return ""
+        return url.rsplit("/", 1)[-1].lstrip("@")
+
+    def _name_from_following_title(self, value: str) -> str:
+        title = str(value or "").strip()
+        if "（@" in title:
+            return title.split("（@", 1)[0].strip()
+        if "(@" in title:
+            return title.split("(@", 1)[0].strip()
+        return title
 
     def set_app_setting(self, key: str, value: str) -> None:
         with self._lock, self._connect() as conn:

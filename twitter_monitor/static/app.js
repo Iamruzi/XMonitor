@@ -4,7 +4,10 @@ const state = {
   targets: [],
   groups: [],
   events: [],
+  insights: null,
   resolvedUser: null,
+  activeView: "overview",
+  selectedGroup: "",
   eventPage: 1,
   eventPageSize: 12,
   nextPollAt: null,
@@ -74,6 +77,10 @@ function fmt(value) {
   return String(value).replace("T", " ").replace("Z", "");
 }
 
+function numberText(value) {
+  return Number(value || 0).toLocaleString();
+}
+
 function clip(text, limit = 160) {
   const normalized = String(text || "").replace(/\s+/g, " ").trim();
   return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized;
@@ -116,6 +123,17 @@ function groupNames() {
     ...state.groups.map((group) => group.name),
     ...state.targets.map((target) => target.group_name),
   ].filter(Boolean))].sort();
+}
+
+function setView(view) {
+  state.activeView = view;
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === view);
+  });
+  ["overview", "groups", "projects"].forEach((name) => {
+    const pane = $(`${name}View`);
+    if (pane) pane.classList.toggle("hidden", name !== view);
+  });
 }
 
 function pollDelayText(value) {
@@ -388,6 +406,218 @@ async function loadEvents() {
   renderEvents();
 }
 
+function targetBriefLabel(target) {
+  const handle = target.handle || "unknown";
+  const display = target.displayName || handle;
+  const prefix = target.remarkName ? `${target.remarkName}｜` : "";
+  return `${prefix}${display}（@${handle}）`;
+}
+
+function miniProjectItem(project) {
+  const item = document.createElement("article");
+  item.className = `mini-project ${project.isProject ? "project" : ""}`;
+  item.innerHTML = `
+    <div>
+      <strong>${escapeHtml(project.name || project.handle)}</strong>
+      <span>@${escapeHtml(project.handle)} · 共同 ${Number(project.commonCount || 0)} 人</span>
+    </div>
+    <span class="project-tag">${escapeHtml(project.category || "账号")}</span>
+  `;
+  item.addEventListener("click", () => {
+    setView("projects");
+    $("projectSearch").value = project.handle || project.name || "";
+    renderProjects();
+  });
+  return item;
+}
+
+function groupCard(group) {
+  const card = document.createElement("article");
+  card.className = `group-card ${state.selectedGroup === group.name ? "active" : ""}`;
+  card.tabIndex = 0;
+  card.innerHTML = `
+    <div class="group-card-top">
+      <strong>${escapeHtml(group.name)}</strong>
+      <span>${Number(group.enabledCount || 0)} / ${Number(group.targetCount || 0)} 运行</span>
+    </div>
+    <div class="group-card-metrics">
+      <span>采集 ${numberText(group.followingAccounts)} 个关注</span>
+      <span>共同 ${numberText(group.sharedAccounts)} 个</span>
+      <span>项目 ${numberText(group.projectAccounts)} 个</span>
+    </div>
+  `;
+  const select = () => {
+    state.selectedGroup = group.name;
+    renderGroupCards();
+  };
+  card.addEventListener("click", select);
+  card.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    select();
+  });
+  return card;
+}
+
+function renderGroupCards() {
+  const list = $("groupCards");
+  if (!list) return;
+  const groups = state.insights?.groups || [];
+  $("groupInsightCount").textContent = `${groups.length} 组`;
+  if (!state.selectedGroup || !groups.some((group) => group.name === state.selectedGroup)) {
+    state.selectedGroup = groups[0]?.name || "";
+  }
+  list.innerHTML = "";
+  if (!groups.length) {
+    list.innerHTML = '<div class="group-empty">还没有可展示的分组</div>';
+    renderGroupDetail();
+    return;
+  }
+  groups.forEach((group) => list.appendChild(groupCard(group)));
+  renderGroupDetail();
+}
+
+function renderGroupDetail() {
+  const groups = state.insights?.groups || [];
+  const group = groups.find((item) => item.name === state.selectedGroup);
+  if (!group) {
+    $("groupDetailTitle").textContent = "选择分组";
+    $("groupDetailMeta").textContent = "查看这个分组监控的用户和热门关注对象";
+    $("groupDetailMembers").innerHTML = '<div class="group-empty">暂无分组数据</div>';
+    $("groupDetailProjects").innerHTML = '<div class="group-empty">暂无共同关注</div>';
+    return;
+  }
+  $("groupDetailTitle").textContent = group.name;
+  $("groupDetailMeta").textContent =
+    `${Number(group.targetCount || 0)} 个用户 · ${Number(group.followingAccounts || 0)} 个已采集关注 · ` +
+    `${Number(group.sharedAccounts || 0)} 个共同关注`;
+
+  const members = $("groupDetailMembers");
+  members.innerHTML = "";
+  if (!group.targets?.length) {
+    members.innerHTML = '<div class="group-empty">这个分组还没有监控用户</div>';
+  } else {
+    group.targets.forEach((target) => {
+      const item = document.createElement("article");
+      item.className = "member-item";
+      item.innerHTML = `
+        <div>
+          <strong>${escapeHtml(targetBriefLabel(target))}</strong>
+          <span>${target.followingInitialized ? "关注已建立基线" : "关注待建立基线"} · ${escapeHtml(fmt(target.lastCheckedAt))}</span>
+        </div>
+        <a href="https://x.com/${escapeHtml(target.handle)}" target="_blank" rel="noreferrer">@${escapeHtml(target.handle)}</a>
+      `;
+      members.appendChild(item);
+    });
+  }
+
+  const projects = $("groupDetailProjects");
+  projects.innerHTML = "";
+  if (!group.topProjects?.length) {
+    projects.innerHTML = '<div class="group-empty">这个分组还没有被多人共同关注的项目账号</div>';
+  } else {
+    group.topProjects.forEach((project) => projects.appendChild(miniProjectItem(project)));
+  }
+}
+
+function renderInsightMetrics() {
+  const summary = state.insights?.summary || {};
+  $("insightFollowedAccounts").textContent = numberText(summary.followedAccounts);
+  $("insightProfiledAccounts").textContent = numberText(summary.profiledAccounts);
+  $("insightSharedAccounts").textContent = numberText(summary.sharedAccounts);
+  $("insightProjectAccounts").textContent = numberText(summary.projectAccounts);
+}
+
+function renderProjectGroupFilter() {
+  const select = $("projectGroupFilter");
+  if (!select) return;
+  const current = select.value || "";
+  select.innerHTML = '<option value="">全部分组</option>';
+  (state.insights?.groups || [])
+    .filter((group) => group.name && group.name !== "未分组")
+    .forEach((group) => {
+      const option = document.createElement("option");
+      option.value = group.name;
+      option.textContent = `${group.name}（${Number(group.targetCount || 0)}）`;
+      select.appendChild(option);
+    });
+  select.value = [...select.options].some((option) => option.value === current) ? current : "";
+}
+
+function projectMatches(project) {
+  if ($("projectOnly").checked && !project.isProject) return false;
+  const keyword = $("projectSearch").value.trim().toLowerCase();
+  if (!keyword) return true;
+  const followedBy = (project.followedBy || []).map(targetBriefLabel).join(" ");
+  return [
+    project.name,
+    project.handle,
+    project.summary,
+    project.reason,
+    project.category,
+    followedBy,
+  ].join(" ").toLowerCase().includes(keyword);
+}
+
+function projectCard(project) {
+  const card = document.createElement("article");
+  card.className = `project-card ${project.isProject ? "hot" : ""}`;
+  const profileUrl = `https://x.com/${encodeURIComponent(project.handle || "")}`;
+  const followedBy = project.followedBy || [];
+  const followerChips = followedBy.slice(0, 8).map((target) => (
+    `<span>${escapeHtml(targetBriefLabel(target))}</span>`
+  )).join("");
+  const more = followedBy.length > 8 ? `<span>+${followedBy.length - 8}</span>` : "";
+  card.innerHTML = `
+    <div class="project-card-head">
+      <div>
+        <strong>${escapeHtml(project.name || project.handle)}</strong>
+        <a href="${profileUrl}" target="_blank" rel="noreferrer">@${escapeHtml(project.handle)}</a>
+      </div>
+      <span class="common-badge">共同 ${Number(project.commonCount || 0)} 人</span>
+    </div>
+    <div class="project-tags">
+      <span class="project-tag ${project.isProject ? "hot" : ""}">${escapeHtml(project.category || "账号")}</span>
+      ${project.verified ? '<span class="project-tag">已认证</span>' : ""}
+      <span class="project-tag">粉丝 ${numberText(project.followers)}</span>
+    </div>
+    <p>${escapeHtml(project.summary || "")}</p>
+    <div class="project-reason">${escapeHtml(project.reason || "")}</div>
+    <div class="followed-by">${followerChips}${more}</div>
+    ${project.url ? `<a class="project-url" href="${escapeHtml(project.url)}" target="_blank" rel="noreferrer">${escapeHtml(project.url)}</a>` : ""}
+  `;
+  return card;
+}
+
+function renderProjects() {
+  const list = $("projectsList");
+  if (!list) return;
+  const allProjects = state.insights?.projects || [];
+  const projects = allProjects.filter(projectMatches);
+  $("projectCount").textContent = `${projects.length} / ${allProjects.length} 个`;
+  list.innerHTML = "";
+  if (!projects.length) {
+    list.innerHTML = '<div class="project-empty">没有满足共同关注人数的项目账号</div>';
+    return;
+  }
+  projects.forEach((project) => list.appendChild(projectCard(project)));
+}
+
+async function loadInsights() {
+  const params = new URLSearchParams({
+    min_common: String(Math.max(Number($("projectMinCommon")?.value || 2), 2)),
+    limit: "120",
+  });
+  const group = $("projectGroupFilter")?.value || "";
+  if (group) params.set("group", group);
+  const payload = await api(`/api/following-insights?${params.toString()}`);
+  state.insights = payload.data || { summary: {}, groups: [], projects: [] };
+  renderInsightMetrics();
+  renderProjectGroupFilter();
+  renderGroupCards();
+  renderProjects();
+}
+
 function recipientRow({ id = "", title = "", primary = false } = {}) {
   const row = document.createElement("div");
   row.className = "editable-row";
@@ -651,6 +881,7 @@ async function refreshAll() {
   await loadTargets();
   await loadGroups();
   await loadEvents();
+  await loadInsights();
 }
 
 async function loginWithToken(token) {
@@ -684,6 +915,22 @@ $("logout").addEventListener("click", () => {
 $("openSettings").addEventListener("click", () => $("settingsDrawer").classList.remove("hidden"));
 $("closeSettings").addEventListener("click", () => $("settingsDrawer").classList.add("hidden"));
 $("closeSettingsBackdrop").addEventListener("click", () => $("settingsDrawer").classList.add("hidden"));
+
+document.querySelectorAll("[data-view]").forEach((button) => {
+  button.addEventListener("click", () => setView(button.dataset.view || "overview"));
+});
+
+$("groupDetailEvents").addEventListener("click", () => {
+  const group = state.selectedGroup;
+  setView("overview");
+  if (group && group !== "未分组") {
+    $("eventGroupFilter").value = group;
+  } else {
+    $("eventGroupFilter").value = "all";
+  }
+  state.eventPage = 1;
+  renderEvents();
+});
 
 $("addTelegramRecipient").addEventListener("click", () => $("telegramRecipients").appendChild(recipientRow()));
 $("addWxpusherRecipient").addEventListener("click", () => $("wxpusherRecipients").appendChild(wxpusherRow()));
@@ -865,6 +1112,26 @@ $("testBark").addEventListener("click", () => testNotification("bark", "Bark"));
   });
 });
 
+$("projectGroupFilter").addEventListener("change", async () => {
+  try {
+    await loadInsights();
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
+
+$("projectMinCommon").addEventListener("change", async () => {
+  try {
+    await loadInsights();
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+});
+
+["projectSearch", "projectOnly"].forEach((id) => {
+  $(id).addEventListener("input", renderProjects);
+});
+
 $("eventPrev").addEventListener("click", () => {
   state.eventPage = Math.max(state.eventPage - 1, 1);
   renderEvents();
@@ -897,6 +1164,7 @@ $("refresh").addEventListener("click", async () => {
 
 async function boot() {
   renderTypeFilter();
+  setView(state.activeView);
   setInterval(updateCountdown, 1000);
   if (!state.token) {
     showLogin();

@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 
+from twitter_cli.models import UserProfile
 from twitter_monitor.storage import MonitorStorage, normalize_handle
 
 
@@ -200,6 +201,63 @@ def test_storage_manages_groups(tmp_path) -> None:
     assert storage.get_target_by_handle("alice")["group_name"] == "核心观察"  # type: ignore[index]
     assert storage.clear_group("核心观察") == 2
     assert storage.get_target_by_handle("bob")["group_name"] == ""  # type: ignore[index]
+
+
+def test_storage_builds_following_insights_from_shared_accounts(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    alice = storage.add_target("alice", group_name="alpha猎手", remark_name="A")
+    bob = storage.add_target("bob", group_name="alpha猎手", remark_name="B")
+    carol = storage.add_target("carol", group_name="beta观察", remark_name="C")
+    storage.upsert_followed_users(
+        [
+            UserProfile(
+                id="project-1",
+                name="Monad",
+                screen_name="monad_xyz",
+                bio="Parallelized EVM Layer 1 blockchain.",
+                followers_count=200000,
+                verified=True,
+                url="https://monad.xyz",
+            ),
+            UserProfile(
+                id="person-1",
+                name="Dana",
+                screen_name="danatrader",
+                bio="Angel investor and trader.",
+                followers_count=5000,
+            ),
+        ]
+    )
+    storage.add_seen_following(alice["id"], ["project-1", "person-1"])
+    storage.add_seen_following(bob["id"], ["project-1", "person-1", "unknown-1"])
+    storage.add_seen_following(carol["id"], ["project-1", "unknown-1"])
+
+    insights = storage.following_insights(min_common=2)
+
+    assert insights["summary"]["followedAccounts"] == 3
+    assert insights["summary"]["sharedAccounts"] == 3
+    assert insights["summary"]["projectAccounts"] == 1
+    assert len(insights["projects"]) == 1
+    assert insights["projects"][0]["handle"] == "monad_xyz"
+    assert insights["projects"][0]["commonCount"] == 3
+    assert insights["projects"][0]["isProject"] is True
+    assert {target["handle"] for target in insights["projects"][0]["followedBy"]} == {
+        "alice",
+        "bob",
+        "carol",
+    }
+    alpha = next(group for group in insights["groups"] if group["name"] == "alpha猎手")
+    assert alpha["targetCount"] == 2
+    assert alpha["sharedAccounts"] == 2
+    assert alpha["projectAccounts"] == 1
+    assert alpha["topProjects"][0]["commonCount"] == 2
+
+    alpha_only = storage.following_insights(group_name="alpha猎手", min_common=2)
+    assert alpha_only["summary"]["monitoredUsers"] == 2
+    assert alpha_only["summary"]["sharedAccounts"] == 2
+    assert alpha_only["summary"]["projectAccounts"] == 1
+    assert alpha_only["projects"][0]["commonCount"] == 2
 
 
 def test_storage_manages_poll_settings(tmp_path) -> None:
