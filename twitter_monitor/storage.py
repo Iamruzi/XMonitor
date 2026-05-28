@@ -1191,6 +1191,7 @@ class MonitorStorage:
         selected_group = self._clean_label(group_name)
         min_common = max(int(min_common), 2)
         limit = max(min(int(limit), 200), 1)
+        group_filter = selected_group or None
         with self._connect() as conn:
             target_rows = conn.execute(
                 """
@@ -1200,22 +1201,28 @@ class MonitorStorage:
                 ORDER BY group_name ASC, created_at DESC
                 """
             ).fetchall()
-            relation_rows = conn.execute(
-                """
-                SELECT seen_following.user_id,
-                       seen_following.first_seen_at,
-                       targets.id AS target_id,
-                       targets.handle AS target_handle,
-                       targets.display_name AS target_display_name,
-                       targets.group_name AS target_group_name,
-                       targets.remark_name AS target_remark_name,
-                       targets.enabled AS target_enabled
-                FROM seen_following
-                JOIN targets ON targets.id = seen_following.target_id
-                ORDER BY seen_following.first_seen_at DESC
-                """
-            ).fetchall()
-            profile_rows = conn.execute("SELECT * FROM followed_users").fetchall()
+            aggregate_rows = self._following_aggregate_rows(conn, group_name=group_filter)
+            shared_rows = [
+                row for row in aggregate_rows if int(row["common_count"] or 0) >= min_common
+            ]
+            candidate_pool_limit = min(max(limit * 8, 600), 900)
+            candidate_user_ids = [
+                str(row["user_id"] or "")
+                for row in shared_rows[:candidate_pool_limit]
+                if row["user_id"]
+            ]
+            relation_rows = self._following_relation_rows_for_user_ids(
+                conn,
+                candidate_user_ids,
+                group_name=group_filter,
+            )
+            profile_rows = self._followed_profile_rows_for_user_ids(conn, candidate_user_ids)
+            group_cards = self._group_insight_cards(conn, target_rows, min_common=min_common)
+            profiled_accounts = self._profiled_following_count(conn, group_name=group_filter)
+            monitors_with_following = self._monitors_with_following_count(
+                conn,
+                group_name=group_filter,
+            )
 
         targets = [self._row_to_dict(row) or {} for row in target_rows]
         profiles = {str(row["user_id"]): dict(row) for row in profile_rows}
@@ -1223,13 +1230,8 @@ class MonitorStorage:
             target for target in targets
             if not selected_group or str(target.get("group_name") or "") == selected_group
         ]
-        visible_target_ids = {int(target["id"]) for target in visible_targets}
-        visible_relations = [
-            row for row in relation_rows
-            if not selected_group or int(row["target_id"]) in visible_target_ids
-        ]
 
-        accounts = self._account_cards_from_relations(visible_relations, profiles)
+        accounts = self._account_cards_from_relations(relation_rows, profiles)
         radar_accounts = [
             account for account in accounts
             if account["commonCount"] >= min_common
@@ -1242,25 +1244,25 @@ class MonitorStorage:
             limit=limit,
         )
 
-        group_cards = self._group_insight_cards(targets, relation_rows, profiles, min_common=min_common)
-        followed_accounts = len(accounts)
-        shared_accounts = sum(1 for account in accounts if account["commonCount"] >= 2)
+        followed_accounts = len(aggregate_rows)
+        shared_accounts = sum(1 for row in aggregate_rows if int(row["common_count"] or 0) >= 2)
         project_accounts = len(project_candidates)
-        monitors_with_following = {
-            int(row["target_id"]) for row in visible_relations if int(row["target_id"]) in visible_target_ids
-        }
+        relationships = sum(int(row["common_count"] or 0) for row in aggregate_rows)
         return {
             "summary": {
                 "groupName": selected_group,
                 "monitoredUsers": len(visible_targets),
-                "monitorsWithFollowing": len(monitors_with_following),
+                "monitorsWithFollowing": monitors_with_following,
                 "followedAccounts": followed_accounts,
-                "profiledAccounts": sum(1 for account in accounts if account["profiled"]),
+                "profiledAccounts": profiled_accounts,
                 "sharedAccounts": shared_accounts,
                 "projectAccounts": project_accounts,
                 "hunterCandidates": len(hunter_candidates),
-                "relationships": len(visible_relations),
+                "relationships": relationships,
                 "minCommon": min_common,
+                "returnedAccounts": len(radar_accounts[:limit]),
+                "candidatePoolSize": len(candidate_user_ids),
+                "hasMoreAccounts": len(shared_rows) > len(radar_accounts),
                 "generatedAt": utc_now(),
             },
             "groups": group_cards,
@@ -1269,6 +1271,137 @@ class MonitorStorage:
             "projectCandidates": project_candidates[:limit],
             "hunterCandidates": hunter_candidates,
         }
+
+    def _following_aggregate_rows(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        group_name: str | None = None,
+        min_common: int | None = None,
+        limit: int | None = None,
+    ) -> list[sqlite3.Row]:
+        where_sql = ""
+        params: list[Any] = []
+        if group_name is not None:
+            where_sql = "WHERE targets.group_name = ?"
+            params.append(group_name)
+        having_sql = ""
+        if min_common is not None:
+            having_sql = "HAVING COUNT(*) >= ?"
+            params.append(max(int(min_common), 1))
+        limit_sql = ""
+        if limit is not None:
+            limit_sql = "LIMIT ?"
+            params.append(max(int(limit), 1))
+        return conn.execute(
+            f"""
+            SELECT seen_following.user_id,
+                   COUNT(*) AS common_count,
+                   MIN(seen_following.first_seen_at) AS first_seen_at,
+                   MAX(seen_following.first_seen_at) AS last_seen_at
+            FROM seen_following
+            JOIN targets ON targets.id = seen_following.target_id
+            {where_sql}
+            GROUP BY seen_following.user_id
+            {having_sql}
+            ORDER BY common_count DESC, last_seen_at DESC, seen_following.user_id ASC
+            {limit_sql}
+            """,
+            params,
+        ).fetchall()
+
+    def _following_relation_rows_for_user_ids(
+        self,
+        conn: sqlite3.Connection,
+        user_ids: list[str],
+        *,
+        group_name: str | None = None,
+    ) -> list[sqlite3.Row]:
+        cleaned_ids = [str(user_id) for user_id in user_ids if str(user_id or "")]
+        if not cleaned_ids:
+            return []
+        placeholders = ", ".join("?" for _ in cleaned_ids)
+        where_sql = f"WHERE seen_following.user_id IN ({placeholders})"
+        params: list[Any] = list(cleaned_ids)
+        if group_name is not None:
+            where_sql += " AND targets.group_name = ?"
+            params.append(group_name)
+        return conn.execute(
+            f"""
+            SELECT seen_following.user_id,
+                   seen_following.first_seen_at,
+                   targets.id AS target_id,
+                   targets.handle AS target_handle,
+                   targets.display_name AS target_display_name,
+                   targets.group_name AS target_group_name,
+                   targets.remark_name AS target_remark_name,
+                   targets.enabled AS target_enabled
+            FROM seen_following
+            JOIN targets ON targets.id = seen_following.target_id
+            {where_sql}
+            ORDER BY seen_following.first_seen_at ASC
+            """,
+            params,
+        ).fetchall()
+
+    def _followed_profile_rows_for_user_ids(
+        self,
+        conn: sqlite3.Connection,
+        user_ids: list[str],
+    ) -> list[sqlite3.Row]:
+        cleaned_ids = [str(user_id) for user_id in user_ids if str(user_id or "")]
+        if not cleaned_ids:
+            return []
+        placeholders = ", ".join("?" for _ in cleaned_ids)
+        return conn.execute(
+            f"SELECT * FROM followed_users WHERE user_id IN ({placeholders})",
+            cleaned_ids,
+        ).fetchall()
+
+    def _profiled_following_count(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        group_name: str | None = None,
+    ) -> int:
+        where_sql = ""
+        params: list[Any] = []
+        if group_name is not None:
+            where_sql = "WHERE targets.group_name = ?"
+            params.append(group_name)
+        row = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT seen_following.user_id) AS count
+            FROM seen_following
+            JOIN targets ON targets.id = seen_following.target_id
+            JOIN followed_users ON followed_users.user_id = seen_following.user_id
+            {where_sql}
+            """,
+            params,
+        ).fetchone()
+        return int(row["count"] or 0) if row is not None else 0
+
+    def _monitors_with_following_count(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        group_name: str | None = None,
+    ) -> int:
+        where_sql = ""
+        params: list[Any] = []
+        if group_name is not None:
+            where_sql = "WHERE targets.group_name = ?"
+            params.append(group_name)
+        row = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT seen_following.target_id) AS count
+            FROM seen_following
+            JOIN targets ON targets.id = seen_following.target_id
+            {where_sql}
+            """,
+            params,
+        ).fetchone()
+        return int(row["count"] or 0) if row is not None else 0
 
     def _account_cards_from_relations(
         self,
@@ -1301,12 +1434,13 @@ class MonitorStorage:
 
     def _group_insight_cards(
         self,
-        targets: list[dict[str, Any]],
-        relation_rows: list[sqlite3.Row],
-        profiles: dict[str, dict[str, Any]],
+        conn: sqlite3.Connection,
+        target_rows: list[sqlite3.Row],
         *,
         min_common: int,
     ) -> list[dict[str, Any]]:
+        targets = [self._row_to_dict(row) or {} for row in target_rows]
+        group_stats = self._group_following_stats(conn, min_common=min_common)
         groups: dict[str, dict[str, Any]] = {}
         for name in self.get_saved_groups():
             groups.setdefault(
@@ -1315,7 +1449,7 @@ class MonitorStorage:
                     "name": name,
                     "targets": [],
                     "enabledCount": 0,
-                    "relations": [],
+                    "groupFilter": name,
                 },
             )
         for target in targets:
@@ -1326,39 +1460,31 @@ class MonitorStorage:
                     "name": name,
                     "targets": [],
                     "enabledCount": 0,
-                    "relations": [],
+                    "groupFilter": str(target.get("group_name") or ""),
                 },
             )
             group["targets"].append(self._target_brief_from_target(target))
             group["enabledCount"] += int(bool(target.get("enabled")))
-        for row in relation_rows:
-            name = str(row["target_group_name"] or "未分组")
-            group = groups.setdefault(
-                name,
-                {
-                    "name": name,
-                    "targets": [],
-                    "enabledCount": 0,
-                    "relations": [],
-                },
-            )
-            group["relations"].append(row)
 
         cards = []
         for name, group in groups.items():
-            accounts = self._account_cards_from_relations(group["relations"], profiles)
-            shared_accounts = [
-                account for account in accounts
-                if account["commonCount"] >= min_common
-            ]
-            shared_accounts.sort(key=self._account_sort_key)
+            shared_accounts = self._top_group_accounts(
+                conn,
+                group_name=str(group.get("groupFilter") or ""),
+                min_common=min_common,
+                limit=80,
+            )
+            stats = group_stats.get(
+                name,
+                {"followingAccounts": 0, "sharedAccounts": 0, "relationships": 0},
+            )
             cards.append(
                 {
                     "name": name,
                     "targetCount": len(group["targets"]),
                     "enabledCount": int(group["enabledCount"]),
-                    "followingAccounts": len(accounts),
-                    "sharedAccounts": sum(1 for account in accounts if account["commonCount"] >= 2),
+                    "followingAccounts": int(stats["followingAccounts"]),
+                    "sharedAccounts": int(stats["sharedAccounts"]),
                     "projectAccounts": sum(1 for account in shared_accounts if account["isProject"]),
                     "targets": group["targets"],
                     "topAccounts": shared_accounts[:8],
@@ -1366,6 +1492,79 @@ class MonitorStorage:
                 }
             )
         return sorted(cards, key=lambda item: (-int(item["targetCount"]), str(item["name"])))
+
+    def _group_following_stats(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        min_common: int,
+    ) -> dict[str, dict[str, int]]:
+        stats: dict[str, dict[str, int]] = {}
+        following_rows = conn.execute(
+            """
+            SELECT COALESCE(NULLIF(targets.group_name, ''), '未分组') AS group_label,
+                   COUNT(DISTINCT seen_following.user_id) AS following_accounts,
+                   COUNT(*) AS relationships
+            FROM seen_following
+            JOIN targets ON targets.id = seen_following.target_id
+            GROUP BY group_label
+            """
+        ).fetchall()
+        for row in following_rows:
+            stats[str(row["group_label"])] = {
+                "followingAccounts": int(row["following_accounts"] or 0),
+                "sharedAccounts": 0,
+                "relationships": int(row["relationships"] or 0),
+            }
+        shared_rows = conn.execute(
+            """
+            SELECT grouped.group_label, COUNT(*) AS shared_accounts
+            FROM (
+                SELECT COALESCE(NULLIF(targets.group_name, ''), '未分组') AS group_label,
+                       seen_following.user_id
+                FROM seen_following
+                JOIN targets ON targets.id = seen_following.target_id
+                GROUP BY group_label, seen_following.user_id
+                HAVING COUNT(*) >= ?
+            ) AS grouped
+            GROUP BY grouped.group_label
+            """,
+            (max(int(min_common), 1),),
+        ).fetchall()
+        for row in shared_rows:
+            label = str(row["group_label"])
+            stats.setdefault(
+                label,
+                {"followingAccounts": 0, "sharedAccounts": 0, "relationships": 0},
+            )
+            stats[label]["sharedAccounts"] = int(row["shared_accounts"] or 0)
+        return stats
+
+    def _top_group_accounts(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        group_name: str,
+        min_common: int,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        aggregate_rows = self._following_aggregate_rows(
+            conn,
+            group_name=group_name,
+            min_common=min_common,
+            limit=max(limit, 1),
+        )
+        user_ids = [str(row["user_id"] or "") for row in aggregate_rows if row["user_id"]]
+        relation_rows = self._following_relation_rows_for_user_ids(
+            conn,
+            user_ids,
+            group_name=group_name,
+        )
+        profile_rows = self._followed_profile_rows_for_user_ids(conn, user_ids)
+        profiles = {str(row["user_id"]): dict(row) for row in profile_rows}
+        accounts = self._account_cards_from_relations(relation_rows, profiles)
+        accounts.sort(key=self._account_sort_key)
+        return accounts
 
     def _followed_account_card(
         self,
