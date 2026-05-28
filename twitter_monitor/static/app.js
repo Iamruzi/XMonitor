@@ -27,34 +27,64 @@ const EVENT_LABELS = {
   test: "测试通知",
 };
 
+class ApiError extends Error {
+  constructor(message, status = 0) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 function headers() {
   const result = { "Content-Type": "application/json" };
   if (state.token) {
     try {
       result["X-Admin-Token"] = encodeURIComponent(state.token);
     } catch (_) {
-      throw new Error("管理密钥包含无效字符，请重新输入");
+      throw new ApiError("管理密钥包含无效字符，请重新输入", 401);
     }
   }
   return result;
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: { ...headers(), ...(options.headers || {}) },
-  });
-  if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const payload = await response.json();
-      detail = payload.detail || detail;
-    } catch (_) {
-      // Keep default error text.
+  const { timeoutMs = 15000, headers: optionHeaders = {}, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(path, {
+      ...fetchOptions,
+      signal: fetchOptions.signal || controller.signal,
+      headers: { ...headers(), ...optionHeaders },
+    });
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const payload = await response.json();
+        detail = payload.detail || detail;
+      } catch (_) {
+        // Keep default error text.
+      }
+      throw new ApiError(detail, response.status);
     }
-    throw new Error(detail);
+    return response.json();
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new ApiError("请求超时，请稍后重试", 0);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
   }
-  return response.json();
+}
+
+function isInvalidTokenError(error) {
+  return Boolean(error && error.status === 401);
+}
+
+function clearStoredToken() {
+  localStorage.removeItem("monitorAdminToken");
+  state.token = "";
 }
 
 function setStatus(message, isError = false) {
@@ -1146,17 +1176,44 @@ function exportTargetsCsv() {
 
 async function refreshAll() {
   await loadConfig();
-  await loadTargets();
-  await loadGroups();
-  await loadEvents();
-  await loadInsights();
+  await Promise.all([
+    loadTargets(),
+    loadGroups(),
+    loadEvents(),
+    loadInsights(),
+  ]);
+  renderTargetFilter();
+  renderGroupFilter();
+  renderEvents();
 }
 
-async function loginWithToken(token) {
+async function verifyLoginToken() {
+  await api("/api/auth/check", { timeoutMs: 6000 });
+}
+
+async function refreshAfterLogin(restore) {
+  try {
+    await refreshAll();
+    setStatus(restore ? "已恢复登录" : "登录成功");
+  } catch (error) {
+    if (isInvalidTokenError(error)) {
+      clearStoredToken();
+      showLogin();
+      throw error;
+    }
+    setStatus(`登录已保留，数据刷新失败：${error.message || "请求失败"}`, true);
+  }
+}
+
+async function loginWithToken(token, options = {}) {
+  const restore = Boolean(options.restore);
   state.token = token;
   localStorage.setItem("monitorAdminToken", state.token);
-  await refreshAll();
+  await verifyLoginToken();
   showApp();
+  setLoginStatus("");
+  setStatus(restore ? "已恢复登录，正在刷新数据..." : "登录成功，正在刷新数据...");
+  await refreshAfterLogin(restore);
 }
 
 $("loginForm").addEventListener("submit", async (event) => {
@@ -1166,18 +1223,16 @@ $("loginForm").addEventListener("submit", async (event) => {
   try {
     setLoginStatus("正在验证...");
     await loginWithToken(token);
-    showToast("登录成功");
-    setLoginStatus("");
   } catch (error) {
-    localStorage.removeItem("monitorAdminToken");
-    state.token = "";
+    if (isInvalidTokenError(error)) {
+      clearStoredToken();
+    }
     setLoginStatus(error.message || "登录失败", true);
   }
 });
 
 $("logout").addEventListener("click", () => {
-  localStorage.removeItem("monitorAdminToken");
-  state.token = "";
+  clearStoredToken();
   showLogin();
   showToast("已退出登录");
 });
@@ -1481,11 +1536,16 @@ async function boot() {
     return;
   }
   try {
-    await loginWithToken(state.token);
-  } catch (_) {
-    localStorage.removeItem("monitorAdminToken");
-    state.token = "";
-    showLogin();
+    await loginWithToken(state.token, { restore: true });
+  } catch (error) {
+    if (isInvalidTokenError(error)) {
+      clearStoredToken();
+      showLogin();
+      setLoginStatus(error.message || "登录已失效，请重新输入", true);
+      return;
+    }
+    showApp();
+    setStatus(`自动登录暂时无法验证：${error.message || "请求失败"}。已保留本机登录，可稍后刷新。`, true);
   }
 }
 

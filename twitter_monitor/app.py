@@ -345,6 +345,11 @@ def health() -> dict[str, Any]:
     return {"ok": True, "dbPath": settings.db_path}
 
 
+@app.get("/api/auth/check", dependencies=[Depends(require_admin)])
+def auth_check() -> dict[str, Any]:
+    return {"ok": True}
+
+
 @app.get("/api/config")
 def config() -> dict[str, Any]:
     notification = _notification_config()
