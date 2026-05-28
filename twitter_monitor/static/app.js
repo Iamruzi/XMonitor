@@ -1031,11 +1031,12 @@ function renderProjects() {
 async function loadInsights() {
   const params = new URLSearchParams({
     min_common: String(Math.max(Number($("projectMinCommon")?.value || 2), 2)),
-    limit: "120",
+    limit: "200",
+    compact: "1",
   });
   const group = $("projectGroupFilter")?.value || "";
   if (group) params.set("group", group);
-  const payload = await api(`/api/following-insights?${params.toString()}`);
+  const payload = await api(`/api/following-insights?${params.toString()}`, { timeoutMs: 60000 });
   state.insights = payload.data || {
     summary: {},
     groups: [],

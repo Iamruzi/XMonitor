@@ -1262,7 +1262,7 @@ class MonitorStorage:
                 "minCommon": min_common,
                 "returnedAccounts": len(radar_accounts[:limit]),
                 "candidatePoolSize": len(candidate_user_ids),
-                "hasMoreAccounts": len(shared_rows) > len(radar_accounts),
+                "hasMoreAccounts": len(radar_accounts) > limit,
                 "generatedAt": utc_now(),
             },
             "groups": group_cards,

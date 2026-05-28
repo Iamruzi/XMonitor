@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import unquote_to_bytes
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -31,6 +32,7 @@ notifier = TelegramNotifier.from_settings(settings)
 poller = MonitorPoller(storage, settings, notifier)
 
 app = FastAPI(title="Twitter Monitor", version="0.1.0")
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -430,14 +432,48 @@ def list_groups() -> dict[str, Any]:
 
 
 @app.get("/api/following-insights", dependencies=[Depends(require_admin)])
-def following_insights(group: str = "", min_common: int = 2, limit: int = 80) -> dict[str, Any]:
-    return {
-        "data": storage.following_insights(
-            group_name=group,
-            min_common=min_common,
-            limit=limit,
-        )
-    }
+def following_insights(
+    group: str = "",
+    min_common: int = 2,
+    limit: int = 80,
+    compact: bool = False,
+) -> dict[str, Any]:
+    data = storage.following_insights(
+        group_name=group,
+        min_common=min_common,
+        limit=limit,
+    )
+    if compact:
+        data = _compact_following_insights(data)
+    return {"data": data}
+
+
+def _compact_following_insights(data: dict[str, Any]) -> dict[str, Any]:
+    result = dict(data)
+    result["groups"] = [_compact_insight_group(group) for group in data.get("groups", [])]
+    result["accounts"] = [_compact_insight_account(item) for item in data.get("accounts", [])]
+    result["projectCandidates"] = [
+        _compact_insight_account(item) for item in data.get("projectCandidates", [])
+    ]
+    result["hunterCandidates"] = [
+        _compact_insight_account(item) for item in data.get("hunterCandidates", [])
+    ]
+    result["projects"] = []
+    return result
+
+
+def _compact_insight_group(group: dict[str, Any]) -> dict[str, Any]:
+    compacted = dict(group)
+    compacted["topProjects"] = [
+        _compact_insight_account(item) for item in group.get("topProjects", [])
+    ]
+    compacted["topAccounts"] = []
+    return compacted
+
+
+def _compact_insight_account(account: dict[str, Any]) -> dict[str, Any]:
+    drop_keys = {"latestTrendText", "trendEvents"}
+    return {key: value for key, value in account.items() if key not in drop_keys}
 
 
 @app.get("/api/poll-tasks", dependencies=[Depends(require_admin)])
