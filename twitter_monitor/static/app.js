@@ -9,6 +9,7 @@ const state = {
   resolvedUser: null,
   activeView: "overview",
   selectedGroup: "",
+  radarMode: "projects",
   eventPage: 1,
   eventPageSize: 12,
   nextPollAt: null,
@@ -607,6 +608,12 @@ function signalTags(project) {
   )).join("");
 }
 
+function hunterSignalTags(candidate) {
+  return (candidate.hunterSignals || []).slice(0, 5).map((signal) => (
+    `<span class="project-tag hunter">${escapeHtml(signal)}</span>`
+  )).join("");
+}
+
 function timeValue(value) {
   if (!value) return 0;
   const parsed = Date.parse(String(value));
@@ -719,6 +726,24 @@ function projectEvidenceText(project) {
     target.handle || "",
     target.firstSeenAt || "",
   ].join(" ")).join(" ");
+}
+
+function hunterMatches(candidate) {
+  const keyword = $("projectSearch").value.trim().toLowerCase();
+  if (!keyword) return true;
+  const followedBy = (candidate.followedBy || []).map(targetBriefLabel).join(" ");
+  return [
+    candidate.name,
+    candidate.handle,
+    candidate.summary,
+    candidate.reason,
+    candidate.hunterConfidence,
+    candidate.recommendation,
+    (candidate.hunterSignals || []).join(" "),
+    (candidate.hunterMatchedTerms || []).join(" "),
+    followedBy,
+    projectEvidenceText(candidate),
+  ].join(" ").toLowerCase().includes(keyword);
 }
 
 function ageText(days) {
@@ -843,6 +868,7 @@ function renderInsightMetrics() {
   $("insightProfiledAccounts").textContent = numberText(summary.profiledAccounts);
   $("insightSharedAccounts").textContent = numberText(summary.sharedAccounts);
   $("insightProjectAccounts").textContent = numberText(summary.projectAccounts);
+  $("insightHunterCandidates").textContent = numberText(summary.hunterCandidates);
 }
 
 function renderProjectGroupFilter() {
@@ -900,6 +926,16 @@ function sortProjects(projects) {
   });
 }
 
+function sortHunters(candidates) {
+  return [...candidates].sort((a, b) => (
+    Number(b.hunterScore || 0) - Number(a.hunterScore || 0) ||
+    Number(b.commonCount || 0) - Number(a.commonCount || 0) ||
+    Number(b.groupCount || 0) - Number(a.groupCount || 0) ||
+    projectLatestFollowTime(b) - projectLatestFollowTime(a) ||
+    String(a.handle || "").localeCompare(String(b.handle || ""))
+  ));
+}
+
 function projectCard(project) {
   const card = document.createElement("article");
   const heat = projectHeat(project);
@@ -935,18 +971,61 @@ function projectCard(project) {
   return card;
 }
 
+function hunterCard(candidate) {
+  const card = document.createElement("article");
+  card.className = "project-card hunter-card";
+  const profileUrl = `https://x.com/${encodeURIComponent(candidate.handle || "")}`;
+  const followedBy = candidate.followedBy || [];
+  card.innerHTML = `
+    <div class="project-card-head">
+      <div>
+        <strong>${escapeHtml(candidate.name || candidate.handle)}</strong>
+        <a href="${profileUrl}" target="_blank" rel="noreferrer">@${escapeHtml(candidate.handle)}</a>
+      </div>
+      <span class="common-badge hunter">猎手分 ${Number(candidate.hunterScore || 0)}</span>
+    </div>
+    <div class="project-tags">
+      <span class="project-tag hunter">${escapeHtml(candidate.hunterConfidence || "观察")}</span>
+      <span class="project-tag">共同 ${Number(candidate.commonCount || 0)} 人</span>
+      <span class="project-tag">跨组 ${Number(candidate.groupCount || 0)} 个</span>
+      <span class="project-tag">粉丝 ${numberText(candidate.followers)}</span>
+      ${candidate.following ? `<span class="project-tag">关注 ${numberText(candidate.following)}</span>` : ""}
+      ${hunterSignalTags(candidate)}
+    </div>
+    <p>${escapeHtml(candidate.summary || "")}</p>
+    <div class="project-reason">${escapeHtml(candidate.recommendation || "建议先影子观察")}</div>
+    ${projectTimeline(candidate)}
+    <div class="evidence-list">${evidenceRows(followedBy)}</div>
+    ${candidate.url ? `<a class="project-url" href="${escapeHtml(candidate.url)}" target="_blank" rel="noreferrer">${escapeHtml(candidate.url)}</a>` : ""}
+  `;
+  return card;
+}
+
 function renderProjects() {
   const list = $("projectsList");
   if (!list) return;
-  const allProjects = state.insights?.accounts || state.insights?.projects || [];
-  const projects = sortProjects(allProjects.filter(projectMatches));
-  $("projectCount").textContent = `${projects.length} / ${allProjects.length} 个`;
+  const mode = state.radarMode || "projects";
+  const source = mode === "hunters"
+    ? (state.insights?.hunterCandidates || [])
+    : mode === "all"
+      ? (state.insights?.accounts || [])
+      : (state.insights?.projectCandidates || state.insights?.projects || []);
+  const items = mode === "hunters"
+    ? sortHunters(source.filter(hunterMatches))
+    : sortProjects(source.filter(projectMatches));
+  $("projectCount").textContent = `${items.length} / ${source.length} 个`;
+  $("projectOnly").disabled = mode === "hunters";
+  document.querySelectorAll("[data-radar-mode]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.radarMode === mode);
+  });
   list.innerHTML = "";
-  if (!projects.length) {
-    list.innerHTML = '<div class="project-empty">没有满足共同关注人数的账号</div>';
+  if (!items.length) {
+    list.innerHTML = mode === "hunters"
+      ? '<div class="project-empty">还没有满足评分的猎手候选</div>'
+      : '<div class="project-empty">没有满足共同关注人数的项目候选</div>';
     return;
   }
-  projects.forEach((project) => list.appendChild(projectCard(project)));
+  items.forEach((item) => list.appendChild(mode === "hunters" ? hunterCard(item) : projectCard(item)));
 }
 
 async function loadInsights() {
@@ -957,7 +1036,14 @@ async function loadInsights() {
   const group = $("projectGroupFilter")?.value || "";
   if (group) params.set("group", group);
   const payload = await api(`/api/following-insights?${params.toString()}`);
-  state.insights = payload.data || { summary: {}, groups: [], accounts: [], projects: [] };
+  state.insights = payload.data || {
+    summary: {},
+    groups: [],
+    accounts: [],
+    projects: [],
+    projectCandidates: [],
+    hunterCandidates: [],
+  };
   renderInsightMetrics();
   renderProjectGroupFilter();
   renderGroupCards();
@@ -1322,6 +1408,14 @@ $("closeSettingsBackdrop").addEventListener("click", () => $("settingsDrawer").c
 document.querySelectorAll("[data-view]").forEach((button) => {
   button.addEventListener("click", () => {
     setView(button.dataset.view || "overview");
+    showToast(`已切换到${button.textContent.trim()}`);
+  });
+});
+
+document.querySelectorAll("[data-radar-mode]").forEach((button) => {
+  button.addEventListener("click", () => {
+    state.radarMode = button.dataset.radarMode || "projects";
+    renderProjects();
     showToast(`已切换到${button.textContent.trim()}`);
   });
 });

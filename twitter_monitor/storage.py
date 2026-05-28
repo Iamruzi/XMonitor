@@ -182,6 +182,53 @@ PERSON_HINTS = (
     "邀请码",
 )
 
+HUNTER_HINTS = (
+    "alpha",
+    "airdrop",
+    "hunter",
+    "researcher",
+    "analyst",
+    "trader",
+    "degen",
+    "onchain",
+    "on-chain",
+    "builder",
+    "founder",
+    "co-founder",
+    "angel",
+    "investor",
+    "vc",
+    "defi",
+    "crypto",
+    "web3",
+    "链上",
+    "空投",
+    "撸毛",
+    "猎手",
+    "研究员",
+    "交易员",
+    "投研",
+    "一级",
+)
+
+HUNTER_NOISE_HINTS = (
+    "official",
+    "foundation",
+    "protocol",
+    "network",
+    "exchange",
+    "wallet",
+    "launchpad",
+    "community",
+    "support",
+    "news",
+    "media",
+    "招聘",
+    "客服",
+    "官方",
+    "社区",
+)
+
 POLL_TASK_TYPES = {"tweets", "following"}
 
 
@@ -1147,7 +1194,7 @@ class MonitorStorage:
         with self._connect() as conn:
             target_rows = conn.execute(
                 """
-                SELECT id, handle, display_name, group_name, remark_name, enabled,
+                SELECT id, handle, user_id, display_name, group_name, remark_name, enabled,
                        following_initialized, last_checked_at, last_error
                 FROM targets
                 ORDER BY group_name ASC, created_at DESC
@@ -1188,11 +1235,17 @@ class MonitorStorage:
             if account["commonCount"] >= min_common
         ]
         radar_accounts.sort(key=self._account_sort_key)
+        project_candidates = [account for account in radar_accounts if account["isProject"]]
+        hunter_candidates = self._hunter_candidates(
+            radar_accounts,
+            targets=visible_targets,
+            limit=limit,
+        )
 
         group_cards = self._group_insight_cards(targets, relation_rows, profiles, min_common=min_common)
         followed_accounts = len(accounts)
         shared_accounts = sum(1 for account in accounts if account["commonCount"] >= 2)
-        project_accounts = sum(1 for account in radar_accounts if account["isProject"])
+        project_accounts = len(project_candidates)
         monitors_with_following = {
             int(row["target_id"]) for row in visible_relations if int(row["target_id"]) in visible_target_ids
         }
@@ -1205,6 +1258,7 @@ class MonitorStorage:
                 "profiledAccounts": sum(1 for account in accounts if account["profiled"]),
                 "sharedAccounts": shared_accounts,
                 "projectAccounts": project_accounts,
+                "hunterCandidates": len(hunter_candidates),
                 "relationships": len(visible_relations),
                 "minCommon": min_common,
                 "generatedAt": utc_now(),
@@ -1212,6 +1266,8 @@ class MonitorStorage:
             "groups": group_cards,
             "accounts": radar_accounts[:limit],
             "projects": radar_accounts[:limit],
+            "projectCandidates": project_candidates[:limit],
+            "hunterCandidates": hunter_candidates,
         }
 
     def _account_cards_from_relations(
@@ -1416,6 +1472,103 @@ class MonitorStorage:
             int(account.get("followers") or 0),
             str(account.get("handle") or ""),
         )
+
+    def _hunter_candidates(
+        self,
+        accounts: list[dict[str, Any]],
+        *,
+        targets: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        monitored_handles = {
+            str(target.get("handle") or "").lower()
+            for target in targets
+            if target.get("handle")
+        }
+        monitored_user_ids = {
+            str(target.get("user_id") or "")
+            for target in targets
+            if target.get("user_id")
+        }
+        candidates = []
+        for account in accounts:
+            handle = str(account.get("handle") or "")
+            user_id = str(account.get("userId") or "")
+            if not account.get("profiled"):
+                continue
+            if account.get("isProject") or account.get("isUnresolved"):
+                continue
+            if handle.lower() in monitored_handles or user_id in monitored_user_ids:
+                continue
+            score_payload = self._hunter_signal(account)
+            if int(score_payload["hunterScore"]) < 45:
+                continue
+            candidates.append({**account, **score_payload})
+        candidates.sort(
+            key=lambda item: (
+                -int(item.get("hunterScore") or 0),
+                -int(item.get("commonCount") or 0),
+                -int(item.get("groupCount") or 0),
+                int(item.get("followers") or 0),
+                str(item.get("handle") or ""),
+            )
+        )
+        return candidates[:limit]
+
+    def _hunter_signal(self, account: dict[str, Any]) -> dict[str, Any]:
+        handle = str(account.get("handle") or "")
+        name = str(account.get("name") or "")
+        bio = str(account.get("bio") or "")
+        text = " ".join([handle, name, bio]).lower()
+        hit_terms = [term for term in HUNTER_HINTS if self._term_in_text(text, term)]
+        noise_terms = [term for term in HUNTER_NOISE_HINTS if self._term_in_text(text, term)]
+        common_count = int(account.get("commonCount") or 0)
+        group_count = int(account.get("groupCount") or 0)
+        followers = int(account.get("followers") or 0)
+        following = int(account.get("following") or 0)
+        recent_7d = int(account.get("recentFollowCount7d") or 0)
+        score = common_count * 18 + group_count * 12 + min(len(set(hit_terms)), 5) * 8
+        reasons = []
+        if common_count >= 2:
+            reasons.append("被 %s 个已监控 alpha 关注" % common_count)
+        if group_count >= 2:
+            reasons.append("跨 %s 个分组出现" % group_count)
+        if hit_terms:
+            reasons.append("猎手画像：" + "、".join(sorted(set(hit_terms))[:4]))
+        if recent_7d >= 2:
+            score += 10
+            reasons.append("7 天内集中出现")
+        if 500 <= followers <= 150_000:
+            score += 10
+            reasons.append("账号体量适合早期观察")
+        elif followers > 500_000:
+            score -= 18
+            reasons.append("粉丝过高，优先级下降")
+        elif followers == 0:
+            score -= 6
+        if following >= 100:
+            score += 6
+            reasons.append("关注面足够宽")
+        if account.get("verified"):
+            score -= 6
+        if noise_terms:
+            score -= min(len(set(noise_terms)), 4) * 10
+            reasons.append("噪音线索：" + "、".join(sorted(set(noise_terms))[:3]))
+        confidence = "观察"
+        if score >= 85:
+            confidence = "强候选"
+        elif score >= 65:
+            confidence = "候选"
+        if not reasons:
+            reasons.append("共同关注关系较强，等待更多资料验证")
+        return {
+            "hunterScore": max(score, 0),
+            "hunterConfidence": confidence,
+            "hunterSignals": reasons[:5],
+            "hunterMatchedTerms": sorted(set(hit_terms))[:8],
+            "hunterNoiseTerms": sorted(set(noise_terms))[:5],
+            "recommendation": "影子观察，不自动加入核心监控",
+        }
 
     def _project_discovery_signal(
         self,

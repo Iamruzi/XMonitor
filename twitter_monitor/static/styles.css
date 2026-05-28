@@ -293,6 +293,11 @@ a {
   background: #fff8ea;
 }
 
+.project-hero article.hunter {
+  border-color: #9fd4c2;
+  background: #f0fbf7;
+}
+
 .status-grid span {
   display: block;
   color: var(--muted);
@@ -815,7 +820,7 @@ a {
 
 .project-hero {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -830,6 +835,18 @@ a {
   gap: 8px;
   align-items: end;
   margin-bottom: 12px;
+}
+
+.radar-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.radar-tabs button.active {
+  border-color: #24734f;
+  background: #eaf6ef;
+  color: #24734f;
 }
 
 .project-only {
@@ -874,6 +891,11 @@ a {
   border-color: #f2a099;
   background: #fff7f5;
   box-shadow: 0 14px 32px rgba(180, 35, 24, 0.12);
+}
+
+.project-card.hunter-card {
+  border-color: #9fd4c2;
+  background: #f8fffc;
 }
 
 .project-card-head {
@@ -941,6 +963,12 @@ a {
 .project-tag.signal {
   background: #eaf6ef;
   color: #24734f;
+}
+
+.project-tag.hunter,
+.common-badge.hunter {
+  background: #e2f8f0;
+  color: #17664c;
 }
 
 .project-card p,

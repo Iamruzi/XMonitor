@@ -245,8 +245,12 @@
             <strong id="insightSharedAccounts">0</strong>
           </article>
           <article class="hot">
-            <span>疑似项目</span>
+            <span>项目候选</span>
             <strong id="insightProjectAccounts">0</strong>
+          </article>
+          <article class="hunter">
+            <span>猎手候选</span>
+            <strong id="insightHunterCandidates">0</strong>
           </article>
         </section>
 
@@ -254,9 +258,14 @@
           <div class="panel-head">
             <div>
               <h2>项目雷达</h2>
-              <p>展示所有多人共同关注的账号，可切换只看疑似项目</p>
+              <p>从共同关注图谱里筛选项目候选和可能的新 alpha 猎手</p>
             </div>
             <span id="projectCount" class="badge">0 个</span>
+          </div>
+          <div class="radar-tabs" aria-label="雷达类型">
+            <button class="active" data-radar-mode="projects" type="button">项目候选</button>
+            <button data-radar-mode="hunters" type="button">猎手候选</button>
+            <button data-radar-mode="all" type="button">全部共同关注</button>
           </div>
           <div class="project-filters">
             <label>
@@ -278,7 +287,7 @@
             </label>
             <label>
               <span>关键词</span>
-              <input id="projectSearch" type="search" placeholder="搜索项目、简介、关注来源" />
+              <input id="projectSearch" type="search" placeholder="搜索账号、简介、关注来源" />
             </label>
             <label class="inline-check project-only">
               <input id="projectOnly" type="checkbox" />
