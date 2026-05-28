@@ -8,9 +8,11 @@ from typing import Any
 
 from twitter_cli.client import TwitterClient, set_runtime_proxy
 from twitter_cli.config import load_config
+from twitter_cli.exceptions import TwitterAPIError
 from twitter_cli.serialization import tweet_to_dict, user_profile_to_dict
 
 from .notifiers import BarkNotifier, CompositeNotifier, TelegramNotifier, WxPusherNotifier
+from .rate_limiter import XRequestLimiter
 from .settings import MonitorSettings
 from .storage import MonitorStorage
 
@@ -35,6 +37,10 @@ class MonitorPoller:
         self.storage = storage
         self.settings = settings
         self.notifier = notifier
+        self.request_limiter = XRequestLimiter(
+            min_delay_seconds=settings.x_request_delay_min_seconds,
+            max_delay_seconds=settings.x_request_delay_max_seconds,
+        )
 
     def poll_all(self) -> dict[str, Any]:
         targets = [target for target in self.storage.list_targets() if target.get("enabled")]
@@ -84,6 +90,50 @@ class MonitorPoller:
             logger.exception("Failed to poll @%s", handle)
             self.storage.set_checked(target_id, error=str(exc))
             result["error"] = str(exc)
+        return result
+
+    def poll_target_task(self, target: dict[str, Any], task_type: str) -> dict[str, Any]:
+        target_id = int(target["id"])
+        handle = str(target["handle"])
+        result = {
+            "targetId": target_id,
+            "handle": handle,
+            "taskType": task_type,
+            "newTweets": 0,
+            "newRetweets": 0,
+            "newReplies": 0,
+            "newFollowing": 0,
+            "notificationsSent": 0,
+            "notificationErrors": 0,
+            "snapshotted": [],
+        }  # type: dict[str, Any]
+        try:
+            client = self._make_client()
+            profile = client.fetch_user(handle)
+            self.storage.set_profile(
+                target_id,
+                user_id=profile.id,
+                handle=profile.screen_name or handle,
+                display_name=profile.name,
+            )
+            if task_type == "tweets":
+                if target.get("monitor_tweets"):
+                    result.update(self._poll_tweets(client, target, profile.id))
+            elif task_type == "following":
+                if target.get("monitor_following"):
+                    following_result = self._poll_following(client, target, profile.id)
+                    result["newFollowing"] = following_result["newFollowing"]
+                    result["notificationsSent"] += following_result["notificationsSent"]
+                    result["notificationErrors"] += following_result["notificationErrors"]
+                    result["snapshotted"].extend(following_result["snapshotted"])
+            else:
+                raise ValueError("未知轮询任务类型：%s" % task_type)
+            self.storage.set_checked(target_id, error=None)
+        except Exception as exc:
+            logger.exception("Failed to run %s task for @%s", task_type, handle)
+            self.storage.set_checked(target_id, error=str(exc))
+            result["error"] = str(exc)
+            result["errorCode"] = self._error_code(exc)
         return result
 
     def backfill_following(self, target: dict[str, Any], count: int | None = None) -> dict[str, Any]:
@@ -153,7 +203,7 @@ class MonitorPoller:
             raise RuntimeError("TWITTER_AUTH_TOKEN and TWITTER_CT0 are required")
         set_runtime_proxy(self._network_proxy())
         config = load_config()
-        return TwitterClient(auth_token, ct0, config.get("rateLimit"))
+        return TwitterClient(auth_token, ct0, config.get("rateLimit"), request_limiter=self.request_limiter)
 
     def _network_proxy(self) -> str:
         db_settings = self.storage.get_notification_settings()
@@ -392,3 +442,8 @@ class MonitorPoller:
             return int(str(raw))
         except (TypeError, ValueError):
             return default
+
+    def _error_code(self, exc: Exception) -> str:
+        if isinstance(exc, TwitterAPIError):
+            return exc.error_code
+        return getattr(exc, "error_code", "api_error")

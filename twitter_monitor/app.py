@@ -19,9 +19,9 @@ from pydantic import BaseModel
 from .bot import TelegramCommandBot
 from .notifiers import TelegramNotifier
 from .poller import MonitorPoller
-from .scheduler import PollSchedule, poll_result_failed
+from .scheduler import poll_result_failed
 from .settings import load_settings
-from .storage import MonitorStorage
+from .storage import MonitorStorage, utc_after
 
 logger = logging.getLogger(__name__)
 
@@ -287,35 +287,67 @@ async def on_shutdown() -> None:
 
 
 async def _worker_loop() -> None:
-    poll_config = _poll_config()
-    schedule = PollSchedule(
-        min_seconds=poll_config["pollIntervalMinSeconds"],
-        max_seconds=poll_config["pollIntervalMaxSeconds"],
-        backoff_max_seconds=poll_config["pollBackoffMaxSeconds"],
-    )
     await asyncio.sleep(3)
     while True:
         failed = False
         try:
-            result = await asyncio.to_thread(poller.poll_all)
+            result = await asyncio.to_thread(_run_due_poll_tasks)
             failed = poll_result_failed(result)
         except Exception:
             logger.exception("Background poll failed")
             failed = True
         if failed:
-            schedule.record_failure()
+            app.state.poll_failures = getattr(app.state, "poll_failures", 0) + 1
         else:
-            schedule.record_success()
-        poll_config = _poll_config()
-        schedule.min_seconds = poll_config["pollIntervalMinSeconds"]
-        schedule.max_seconds = poll_config["pollIntervalMaxSeconds"]
-        schedule.backoff_max_seconds = poll_config["pollBackoffMaxSeconds"]
-        delay = schedule.next_delay()
-        app.state.poll_failures = schedule.failures
+            app.state.poll_failures = 0
+        delay = 15
         app.state.next_poll_delay_seconds = delay
         app.state.next_poll_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
-        logger.info("Next background poll in %s seconds, failures=%s", delay, schedule.failures)
+        logger.info("Next queue check in %s seconds, failures=%s", delay, app.state.poll_failures)
         await asyncio.sleep(delay)
+
+
+def _run_due_poll_tasks() -> dict[str, Any]:
+    storage.sync_poll_tasks(
+        tweet_interval_seconds=settings.tweet_poll_interval_seconds,
+        following_interval_seconds=settings.following_poll_interval_seconds,
+    )
+    tasks = storage.acquire_due_poll_tasks(limit=settings.poll_task_batch_size)
+    results = []
+    for index, task in enumerate(tasks):
+        result = poller.poll_target_task(task["target"], str(task["taskType"]))
+        success = not bool(result.get("error"))
+        delay = _next_task_delay(task, result)
+        storage.complete_poll_task(
+            int(task["id"]),
+            success=success,
+            next_run_after=utc_after(delay),
+            error=str(result.get("error") or ""),
+        )
+        results.append(result)
+        if result.get("errorCode") in {"rate_limited", "not_authenticated"}:
+            for pending in tasks[index + 1:]:
+                storage.defer_poll_task(
+                    int(pending["id"]),
+                    next_run_after=utc_after(delay),
+                    error="全局请求冷却，任务已延后",
+                )
+            break
+    return {"targetsChecked": len(results), "results": results}
+
+
+def _next_task_delay(task: dict[str, Any], result: dict[str, Any]) -> int:
+    if not result.get("error"):
+        if task["taskType"] == "following":
+            return settings.following_poll_interval_seconds
+        return settings.tweet_poll_interval_seconds
+    if result.get("errorCode") == "rate_limited":
+        return settings.rate_limit_cooldown_seconds
+    if result.get("errorCode") == "not_authenticated":
+        return settings.auth_error_cooldown_seconds
+    attempts = int(task.get("attempts") or 0) + 1
+    base = min(settings.tweet_poll_interval_seconds, 300)
+    return min(base * (2 ** min(attempts - 1, 5)), settings.poll_backoff_max_seconds)
 
 
 async def _telegram_bot_loop() -> None:
@@ -377,6 +409,11 @@ def config() -> dict[str, Any]:
         "defaultTweetFetchCount": settings.default_tweet_fetch_count,
         "defaultFollowingFetchCount": settings.default_following_fetch_count,
         "defaultInitialFollowingFetchCount": settings.default_initial_following_fetch_count,
+        "tweetPollIntervalSeconds": settings.tweet_poll_interval_seconds,
+        "followingPollIntervalSeconds": settings.following_poll_interval_seconds,
+        "xRequestDelayMinSeconds": settings.x_request_delay_min_seconds,
+        "xRequestDelayMaxSeconds": settings.x_request_delay_max_seconds,
+        "pollTaskBatchSize": settings.poll_task_batch_size,
         "notification": notification,
         "stats": storage.stats(),
     }
@@ -401,6 +438,15 @@ def following_insights(group: str = "", min_common: int = 2, limit: int = 80) ->
             limit=limit,
         )
     }
+
+
+@app.get("/api/poll-tasks", dependencies=[Depends(require_admin)])
+def poll_tasks(limit: int = 30) -> dict[str, Any]:
+    storage.sync_poll_tasks(
+        tweet_interval_seconds=settings.tweet_poll_interval_seconds,
+        following_interval_seconds=settings.following_poll_interval_seconds,
+    )
+    return {"data": storage.poll_queue_status(limit=limit)}
 
 
 @app.post("/api/groups", dependencies=[Depends(require_admin)])

@@ -5,6 +5,7 @@ const state = {
   groups: [],
   events: [],
   insights: null,
+  pollQueue: null,
   resolvedUser: null,
   activeView: "overview",
   selectedGroup: "",
@@ -160,6 +161,12 @@ function fmtCompact(value) {
   return fmt(value).slice(0, 16);
 }
 
+function isDue(value) {
+  if (!value) return false;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) && parsed <= Date.now();
+}
+
 function numberText(value) {
   return Number(value || 0).toLocaleString();
 }
@@ -199,6 +206,26 @@ function targetIdentity(target) {
   if (remarkName) parts.push(remarkName);
   parts.push(targetDisplay(target));
   return parts.join("｜");
+}
+
+function taskTypeText(value) {
+  if (value === "following") return "关注";
+  if (value === "tweets") return "推文";
+  return "任务";
+}
+
+function taskStateText(task) {
+  if (task.status === "running") return "运行中";
+  if (task.lastError) return `异常后等待 ${fmtCompact(task.runAfter)}`;
+  if (isDue(task.runAfter)) return "待执行";
+  return `下次 ${fmtCompact(task.runAfter)}`;
+}
+
+function pollTaskLine(tasks) {
+  if (!tasks || !tasks.length) return "调度队列待同步";
+  return tasks
+    .map((task) => `${taskTypeText(task.taskType)} ${taskStateText(task)}`)
+    .join(" · ");
 }
 
 function groupNames() {
@@ -315,6 +342,7 @@ function targetRow(target) {
     <td>
       <span>${escapeHtml(fmt(target.last_checked_at))}</span>
       <small>推文${target.tweets_initialized ? "已记录" : "待记录"} · 关注${target.following_initialized ? "已记录" : "待记录"}</small>
+      <small class="poll-task-line">${escapeHtml(pollTaskLine(target.pollTasks || []))}</small>
     </td>
     <td>
       <div class="row-actions">
@@ -507,6 +535,43 @@ async function loadEvents() {
   state.events = payload.data || [];
   renderTypeFilter();
   renderEvents();
+}
+
+function renderPollTasks() {
+  const data = state.pollQueue || { summary: {}, tasks: [] };
+  const summary = data.summary || {};
+  const tasks = data.tasks || [];
+  $("metricPollDue").textContent = numberText(summary.due || 0);
+  $("metricPollGuard").textContent = `${numberText(summary.running || 0)} / ${numberText(summary.errors || 0)}`;
+  $("pollQueueCount").textContent = `${numberText(summary.total || 0)} 个任务`;
+  const list = $("pollTaskList");
+  list.innerHTML = "";
+  if (!tasks.length) {
+    list.innerHTML = '<div class="task-item"><strong>暂无调度任务</strong><span>等待后台同步监控用户</span></div>';
+    return;
+  }
+  tasks.slice(0, 8).forEach((task) => {
+    const item = document.createElement("div");
+    item.className = `task-item ${task.status === "running" ? "running" : ""} ${task.lastError ? "error" : ""}`;
+    const target = task.targetLabel || targetIdentity({
+      group_name: task.targetGroupName,
+      remark_name: task.targetRemarkName,
+      display_name: task.targetDisplayName,
+      handle: task.targetHandle,
+    });
+    item.innerHTML = `
+      <strong>${escapeHtml(taskTypeText(task.taskType))} · ${escapeHtml(target)}</strong>
+      <span>${escapeHtml(taskStateText(task))}</span>
+      ${task.lastError ? `<span>${escapeHtml(clip(task.lastError, 80))}</span>` : ""}
+    `;
+    list.appendChild(item);
+  });
+}
+
+async function loadPollTasks() {
+  const payload = await api("/api/poll-tasks?limit=12");
+  state.pollQueue = payload.data || { summary: {}, tasks: [] };
+  renderPollTasks();
 }
 
 function targetBriefLabel(target) {
@@ -1177,6 +1242,7 @@ function exportTargetsCsv() {
 async function refreshAll() {
   await loadConfig();
   await Promise.all([
+    loadPollTasks(),
     loadTargets(),
     loadGroups(),
     loadEvents(),

@@ -20,6 +20,14 @@ def _as_int(value: str | None, default: int, *, minimum: int = 1) -> int:
     return max(parsed, minimum)
 
 
+def _as_float(value: str | None, default: float, *, minimum: float = 0.0) -> float:
+    try:
+        parsed = float(value or "")
+    except ValueError:
+        parsed = default
+    return max(parsed, minimum)
+
+
 @dataclass(frozen=True)
 class MonitorSettings:
     db_path: str
@@ -45,6 +53,13 @@ class MonitorSettings:
     bark_group: str = "XMonitor"
     bark_call: bool = False
     bark_volume: int = 5
+    x_request_delay_min_seconds: float = 3.0
+    x_request_delay_max_seconds: float = 5.0
+    poll_task_batch_size: int = 1
+    tweet_poll_interval_seconds: int = 600
+    following_poll_interval_seconds: int = 1800
+    rate_limit_cooldown_seconds: int = 1800
+    auth_error_cooldown_seconds: int = 3600
 
     @property
     def telegram_configured(self) -> bool:
@@ -102,4 +117,15 @@ def load_settings() -> MonitorSettings:
         bark_group=os.environ.get("BARK_GROUP", "XMonitor"),
         bark_call=_as_bool(os.environ.get("BARK_CALL"), False),
         bark_volume=_as_int(os.environ.get("BARK_VOLUME"), 5, minimum=0),
+        x_request_delay_min_seconds=_as_float(os.environ.get("MONITOR_X_REQUEST_DELAY_MIN"), 3.0),
+        x_request_delay_max_seconds=_as_float(os.environ.get("MONITOR_X_REQUEST_DELAY_MAX"), 5.0),
+        poll_task_batch_size=_as_int(os.environ.get("MONITOR_POLL_TASK_BATCH_SIZE"), 1),
+        tweet_poll_interval_seconds=_as_int(os.environ.get("MONITOR_TWEET_POLL_INTERVAL"), 600, minimum=60),
+        following_poll_interval_seconds=_as_int(
+            os.environ.get("MONITOR_FOLLOWING_POLL_INTERVAL"),
+            1800,
+            minimum=300,
+        ),
+        rate_limit_cooldown_seconds=_as_int(os.environ.get("MONITOR_X_RATE_LIMIT_COOLDOWN"), 1800),
+        auth_error_cooldown_seconds=_as_int(os.environ.get("MONITOR_X_AUTH_COOLDOWN"), 3600),
     )

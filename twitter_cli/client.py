@@ -175,11 +175,12 @@ def _url_fetch(url, headers=None):
 class TwitterClient:
     """Twitter GraphQL API client using cookie authentication."""
 
-    def __init__(self, auth_token, ct0, rate_limit_config=None, cookie_string=None):
-        # type: (str, str, Optional[Dict[str, Any]], Optional[str]) -> None
+    def __init__(self, auth_token, ct0, rate_limit_config=None, cookie_string=None, request_limiter=None):
+        # type: (str, str, Optional[Dict[str, Any]], Optional[str], Optional[Any]) -> None
         self._auth_token = auth_token
         self._ct0 = ct0
         self._cookie_string = cookie_string  # Full browser cookie string
+        self._request_limiter = request_limiter
         rl = rate_limit_config or {}
         self._request_delay = float(rl.get("requestDelay", 2.5))
         self._max_retries = int(rl.get("maxRetries", 3))
@@ -998,12 +999,21 @@ class TwitterClient:
 
         for attempt in range(self._max_retries + 1):
             try:
-                if method == "POST":
-                    response = session.post(
-                        url, headers=headers, json=json_body, timeout=30,
-                    )
+                if self._request_limiter is None:
+                    if method == "POST":
+                        response = session.post(
+                            url, headers=headers, json=json_body, timeout=30,
+                        )
+                    else:
+                        response = session.get(url, headers=headers, timeout=30)
                 else:
-                    response = session.get(url, headers=headers, timeout=30)
+                    with self._request_limiter:
+                        if method == "POST":
+                            response = session.post(
+                                url, headers=headers, json=json_body, timeout=30,
+                            )
+                        else:
+                            response = session.get(url, headers=headers, timeout=30)
 
                 status_code = response.status_code
                 if status_code == 429 and attempt < self._max_retries:

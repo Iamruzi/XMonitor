@@ -263,7 +263,7 @@ a {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -356,7 +356,7 @@ a {
   display: grid;
   grid-template-columns: minmax(1280px, 1fr) minmax(360px, 0.32fr);
   gap: 8px;
-  height: calc(100vh - 226px);
+  height: calc(100vh - 346px);
   min-height: 610px;
 }
 
@@ -366,6 +366,54 @@ a {
   flex-direction: column;
   padding: 14px;
   overflow: hidden;
+}
+
+.queue-panel {
+  min-height: 118px;
+  margin-bottom: 8px;
+}
+
+.task-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 8px;
+  min-height: 0;
+}
+
+.task-item {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  font-size: 12px;
+}
+
+.task-item.running {
+  border-color: #bdd7ff;
+  background: #eef6ff;
+}
+
+.task-item.error {
+  border-color: #e6b1ac;
+  background: #fff7f5;
+}
+
+.task-item strong,
+.task-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-item span {
+  color: var(--muted);
+}
+
+.poll-task-line {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .panel-head {
@@ -1287,7 +1335,7 @@ a {
 @media (max-width: 1180px) {
   .status-grid,
   .project-hero {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .actionbar {
@@ -1306,6 +1354,10 @@ a {
 
   .panel {
     min-height: 520px;
+  }
+
+  .task-list {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
   }
 }
 
@@ -1338,7 +1390,8 @@ a {
     .editable-row,
     .editable-row.two,
     .test-actions,
-    .drawer-actions {
+    .drawer-actions,
+    .task-list {
     grid-template-columns: 1fr;
   }
 

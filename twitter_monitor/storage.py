@@ -15,6 +15,15 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def utc_after(seconds: int | float) -> str:
+    value = max(float(seconds), 0.0)
+    return (
+        (datetime.now(timezone.utc).replace(microsecond=0) + timedelta(seconds=value))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
 def normalize_handle(handle: str) -> str:
     cleaned = handle.strip().lstrip("@")
     if not cleaned:
@@ -173,6 +182,8 @@ PERSON_HINTS = (
     "邀请码",
 )
 
+POLL_TASK_TYPES = {"tweets", "following"}
+
 
 class MonitorStorage:
     def __init__(self, db_path: str) -> None:
@@ -208,6 +219,27 @@ class MonitorStorage:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS poll_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_id INTEGER NOT NULL,
+                    task_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    run_after TEXT NOT NULL,
+                    leased_until TEXT,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_started_at TEXT,
+                    last_finished_at TEXT,
+                    last_error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE (target_id, task_type),
+                    FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_poll_tasks_due
+                    ON poll_tasks(status, run_after, priority DESC);
+                CREATE INDEX IF NOT EXISTS idx_poll_tasks_target
+                    ON poll_tasks(target_id);
                 CREATE TABLE IF NOT EXISTS seen_tweets (
                     target_id INTEGER NOT NULL,
                     tweet_id TEXT NOT NULL,
@@ -341,6 +373,43 @@ class MonitorStorage:
                 data[key] = bool(data[key])
         return data
 
+    def _poll_task_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        target_label = self._target_brief_label(
+            {
+                "groupName": row["target_group_name"] if "target_group_name" in row.keys() else "",
+                "remarkName": row["target_remark_name"] if "target_remark_name" in row.keys() else "",
+                "handle": row["target_handle"] if "target_handle" in row.keys() else "",
+                "displayName": row["target_display_name"] if "target_display_name" in row.keys() else "",
+            }
+        )
+        return {
+            "id": int(row["id"]),
+            "targetId": int(row["target_id"]),
+            "targetHandle": str(row["target_handle"] if "target_handle" in row.keys() else ""),
+            "targetDisplayName": str(row["target_display_name"] if "target_display_name" in row.keys() else ""),
+            "targetGroupName": str(row["target_group_name"] if "target_group_name" in row.keys() else ""),
+            "targetRemarkName": str(row["target_remark_name"] if "target_remark_name" in row.keys() else ""),
+            "targetLabel": target_label if target_label != "未分组｜unknown（@unknown）" else "",
+            "taskType": str(row["task_type"]),
+            "status": str(row["status"]),
+            "priority": int(row["priority"] or 0),
+            "runAfter": str(row["run_after"] or ""),
+            "leasedUntil": str(row["leased_until"] or ""),
+            "attempts": int(row["attempts"] or 0),
+            "lastStartedAt": str(row["last_started_at"] or ""),
+            "lastFinishedAt": str(row["last_finished_at"] or ""),
+            "lastError": str(row["last_error"] or ""),
+            "createdAt": str(row["created_at"] or ""),
+            "updatedAt": str(row["updated_at"] or ""),
+        }
+
+    def _poll_tasks_by_target(self, rows: list[sqlite3.Row]) -> dict[int, list[dict[str, Any]]]:
+        tasks: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            task = self._poll_task_to_dict(row)
+            tasks.setdefault(int(task["targetId"]), []).append(task)
+        return tasks
+
     def add_target(
         self,
         handle: str,
@@ -389,7 +458,12 @@ class MonitorStorage:
     def list_targets(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM targets ORDER BY created_at DESC").fetchall()
-        return [self._row_to_dict(row) or {} for row in rows]
+            task_rows = conn.execute("SELECT * FROM poll_tasks ORDER BY task_type ASC").fetchall()
+        targets = [self._row_to_dict(row) or {} for row in rows]
+        tasks_by_target = self._poll_tasks_by_target(task_rows)
+        for target in targets:
+            target["pollTasks"] = tasks_by_target.get(int(target["id"]), [])
+        return targets
 
     def get_target(self, target_id: int) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -563,6 +637,231 @@ class MonitorStorage:
             "pollIntervalMinSeconds": min_value,
             "pollIntervalMaxSeconds": max_value,
             "pollBackoffMaxSeconds": backoff_value,
+        }
+
+    def sync_poll_tasks(
+        self,
+        *,
+        tweet_interval_seconds: int,
+        following_interval_seconds: int,
+    ) -> dict[str, Any]:
+        del tweet_interval_seconds, following_interval_seconds
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            targets = conn.execute(
+                """
+                SELECT id, monitor_tweets, monitor_following, tweets_initialized, following_initialized
+                FROM targets
+                WHERE enabled = 1
+                """
+            ).fetchall()
+            active_keys = set()
+            rows = []
+            for target in targets:
+                target_id = int(target["id"])
+                if int(target["monitor_tweets"]):
+                    active_keys.add((target_id, "tweets"))
+                    rows.append(
+                        (
+                            target_id,
+                            "tweets",
+                            40 if not int(target["tweets_initialized"]) else 20,
+                            now,
+                            now,
+                            now,
+                        )
+                    )
+                if int(target["monitor_following"]):
+                    active_keys.add((target_id, "following"))
+                    rows.append(
+                        (
+                            target_id,
+                            "following",
+                            30 if not int(target["following_initialized"]) else 10,
+                            now,
+                            now,
+                            now,
+                        )
+                    )
+            if rows:
+                conn.executemany(
+                    """
+                    INSERT INTO poll_tasks (
+                        target_id, task_type, priority, run_after, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(target_id, task_type) DO UPDATE SET
+                        priority = excluded.priority,
+                        updated_at = excluded.updated_at
+                    """,
+                    rows,
+                )
+            existing = conn.execute("SELECT target_id, task_type FROM poll_tasks").fetchall()
+            stale = [
+                (int(row["target_id"]), str(row["task_type"]))
+                for row in existing
+                if (int(row["target_id"]), str(row["task_type"])) not in active_keys
+            ]
+            conn.executemany(
+                "DELETE FROM poll_tasks WHERE target_id = ? AND task_type = ?",
+                stale,
+            )
+        return self.poll_queue_status()
+
+    def acquire_due_poll_tasks(self, *, limit: int = 1, lease_seconds: int = 900) -> list[dict[str, Any]]:
+        now = utc_now()
+        lease_until = utc_after(lease_seconds)
+        result = []
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT poll_tasks.*
+                FROM poll_tasks
+                JOIN targets ON targets.id = poll_tasks.target_id
+                WHERE targets.enabled = 1
+                  AND (
+                    (poll_tasks.status = 'queued' AND poll_tasks.run_after <= ?)
+                    OR (poll_tasks.status = 'running' AND poll_tasks.leased_until <= ?)
+                  )
+                  AND (
+                    (poll_tasks.task_type = 'tweets' AND targets.monitor_tweets = 1)
+                    OR (poll_tasks.task_type = 'following' AND targets.monitor_following = 1)
+                  )
+                ORDER BY poll_tasks.priority DESC, poll_tasks.run_after ASC, poll_tasks.id ASC
+                LIMIT ?
+                """,
+                (now, now, max(int(limit), 1)),
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    """
+                    UPDATE poll_tasks
+                    SET status = 'running',
+                        leased_until = ?,
+                        last_started_at = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (lease_until, now, now, int(row["id"])),
+                )
+                target_row = conn.execute("SELECT * FROM targets WHERE id = ?", (int(row["target_id"]),)).fetchone()
+                task = self._poll_task_to_dict(row)
+                task["status"] = "running"
+                task["leasedUntil"] = lease_until
+                task["lastStartedAt"] = now
+                task["target"] = self._row_to_dict(target_row) or {}
+                result.append(task)
+        return result
+
+    def complete_poll_task(
+        self,
+        task_id: int,
+        *,
+        success: bool,
+        next_run_after: str,
+        error: str | None = None,
+    ) -> None:
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            if success:
+                conn.execute(
+                    """
+                    UPDATE poll_tasks
+                    SET status = 'queued',
+                        run_after = ?,
+                        leased_until = NULL,
+                        attempts = 0,
+                        last_finished_at = ?,
+                        last_error = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (next_run_after, now, now, int(task_id)),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE poll_tasks
+                    SET status = 'queued',
+                        run_after = ?,
+                        leased_until = NULL,
+                        attempts = attempts + 1,
+                        last_finished_at = ?,
+                        last_error = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (next_run_after, now, str(error or "任务失败")[:500], now, int(task_id)),
+                )
+
+    def defer_poll_task(self, task_id: int, *, next_run_after: str, error: str | None = None) -> None:
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE poll_tasks
+                SET status = 'queued',
+                    run_after = ?,
+                    leased_until = NULL,
+                    last_error = COALESCE(?, last_error),
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (next_run_after, error[:500] if error else None, now, int(task_id)),
+            )
+
+    def poll_queue_status(self, *, limit: int = 30) -> dict[str, Any]:
+        now = utc_now()
+        with self._connect() as conn:
+            count_rows = conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN status = 'queued' AND run_after <= ? THEN 1 ELSE 0 END) AS due_count,
+                    SUM(CASE WHEN status = 'queued' AND run_after > ? THEN 1 ELSE 0 END) AS queued_count,
+                    SUM(CASE WHEN status = 'running' AND (leased_until IS NULL OR leased_until > ?) THEN 1 ELSE 0 END)
+                        AS running_count,
+                    SUM(CASE WHEN status = 'running' AND leased_until <= ? THEN 1 ELSE 0 END) AS stale_count,
+                    SUM(CASE WHEN last_error IS NOT NULL AND last_error != '' THEN 1 ELSE 0 END) AS error_count,
+                    COUNT(*) AS total_count
+                FROM poll_tasks
+                """,
+                (now, now, now, now),
+            ).fetchone()
+            rows = conn.execute(
+                """
+                SELECT poll_tasks.*,
+                       targets.handle AS target_handle,
+                       targets.display_name AS target_display_name,
+                       targets.group_name AS target_group_name,
+                       targets.remark_name AS target_remark_name,
+                       targets.enabled AS target_enabled
+                FROM poll_tasks
+                JOIN targets ON targets.id = poll_tasks.target_id
+                ORDER BY
+                    CASE
+                        WHEN poll_tasks.status = 'running' THEN 0
+                        WHEN poll_tasks.run_after <= ? THEN 1
+                        ELSE 2
+                    END,
+                    poll_tasks.run_after ASC,
+                    poll_tasks.priority DESC,
+                    poll_tasks.id ASC
+                LIMIT ?
+                """,
+                (now, max(min(int(limit), 100), 1)),
+            ).fetchall()
+        summary = {
+            "due": int(count_rows["due_count"] or 0),
+            "queued": int(count_rows["queued_count"] or 0),
+            "running": int(count_rows["running_count"] or 0),
+            "stale": int(count_rows["stale_count"] or 0),
+            "errors": int(count_rows["error_count"] or 0),
+            "total": int(count_rows["total_count"] or 0),
+            "generatedAt": now,
+        }
+        return {
+            "summary": summary,
+            "tasks": [self._poll_task_to_dict(row) for row in rows],
         }
 
     def delete_target(self, target_id: int) -> bool:

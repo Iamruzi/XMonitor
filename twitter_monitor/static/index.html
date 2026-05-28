@@ -70,6 +70,14 @@
             <span>下一轮倒计时</span>
             <strong id="nextPoll">计算中</strong>
           </article>
+          <article>
+            <span>待执行任务</span>
+            <strong id="metricPollDue">0</strong>
+          </article>
+          <article>
+            <span>运行/异常</span>
+            <strong id="metricPollGuard">0</strong>
+          </article>
         </section>
 
         <section class="actionbar">
@@ -94,6 +102,17 @@
             <button id="pollAll" class="primary" type="button">立即检查全部</button>
             <button id="refresh" type="button">刷新</button>
           </div>
+        </section>
+
+        <section class="panel queue-panel">
+          <div class="panel-head">
+            <div>
+              <h2>调度队列</h2>
+              <p>后台会错峰检查推文和关注，所有 X 请求共用一个受控闸门</p>
+            </div>
+            <span id="pollQueueCount" class="badge neutral">0 个任务</span>
+          </div>
+          <div id="pollTaskList" class="task-list"></div>
         </section>
 
         <section class="main-workspace">
