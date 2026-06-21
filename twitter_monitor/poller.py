@@ -11,6 +11,7 @@ from twitter_cli.config import load_config
 from twitter_cli.exceptions import TwitterAPIError
 from twitter_cli.serialization import tweet_to_dict, user_profile_to_dict
 
+from .contracts import enrich_payload_with_contracts, event_has_token_contracts
 from .notifiers import BarkNotifier, CompositeNotifier, TelegramNotifier, WxPusherNotifier
 from .rate_limiter import XRequestLimiter
 from .settings import MonitorSettings
@@ -244,7 +245,14 @@ class MonitorPoller:
                 title=title,
                 body=tweet.text,
                 url="https://x.com/%s/status/%s" % (tweet.author.screen_name, tweet.id),
-                payload=tweet_to_dict(tweet),
+                payload=enrich_payload_with_contracts(
+                    tweet_to_dict(tweet),
+                    title,
+                    tweet.text,
+                    getattr(tweet, "article_title", "") or "",
+                    getattr(tweet, "article_text", "") or "",
+                    " ".join(getattr(tweet, "urls", []) or []),
+                ),
             )
             if event:
                 outcome = self._notify(event)
@@ -305,7 +313,13 @@ class MonitorPoller:
         sent = 0
         errors = 0
         for user in reversed(new_users):
-            payload = user_profile_to_dict(user)
+            payload = enrich_payload_with_contracts(
+                user_profile_to_dict(user),
+                user.name,
+                user.screen_name,
+                user.bio,
+                user.url,
+            )
             hot_context = self.storage.followed_account_context(str(user.id))
             if hot_context and hot_context.get("isProject") and int(hot_context.get("commonCount") or 0) >= 2:
                 payload["hotProject"] = self._hot_project_payload(hot_context)
@@ -336,7 +350,7 @@ class MonitorPoller:
         return count
 
     def _notify(self, event: dict[str, Any]) -> dict[str, Any]:
-        outcome = self._notification_adapter().send_event(event)
+        outcome = self._notification_adapter(force_bark=event_has_token_contracts(event)).send_event(event)
         self.storage.mark_event_notified(
             int(event["id"]),
             error=None if outcome.sent else outcome.error,
@@ -357,7 +371,7 @@ class MonitorPoller:
             "trendEvents": list(account.get("trendEvents") or []),
         }
 
-    def _notification_adapter(self, channel: str = "all") -> CompositeNotifier:
+    def _notification_adapter(self, channel: str = "all", *, force_bark: bool = False) -> CompositeNotifier:
         channel = self._normalize_channel(channel)
         db_settings = self.storage.get_notification_settings()
         db_token = db_settings.get("telegram_bot_token") or ""
@@ -402,7 +416,7 @@ class MonitorPoller:
                 hot_filter_enabled=self._setting_bool(bark_settings.get("bark_hot_filter_enabled"), False),
                 hot_filter_min_common=self._setting_int(bark_settings.get("bark_hot_filter_min_common"), 2),
             )
-            if self._setting_bool(bark_settings.get("bark_enabled"), True)
+            if force_bark or self._setting_bool(bark_settings.get("bark_enabled"), True)
             else None
         )
         adapters: list[Any] = []

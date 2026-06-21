@@ -10,6 +10,8 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .contracts import normalize_token_contract
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -418,7 +420,24 @@ class MonitorStorage:
         ):
             if key in data:
                 data[key] = bool(data[key])
+        if "payload_json" in data:
+            data["token_contracts"] = MonitorStorage._token_contracts_from_payload(
+                str(data.get("payload_json") or "{}")
+            )
         return data
+
+    @staticmethod
+    def _token_contracts_from_payload(raw: str) -> list[dict[str, Any]]:
+        try:
+            payload = json.loads(raw or "{}")
+        except (TypeError, ValueError):
+            return []
+        if not isinstance(payload, dict):
+            return []
+        contracts = payload.get("tokenContracts")
+        if not isinstance(contracts, list):
+            return []
+        return [contract for item in contracts if (contract := normalize_token_contract(item))]
 
     def _poll_task_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         target_label = self._target_brief_label(

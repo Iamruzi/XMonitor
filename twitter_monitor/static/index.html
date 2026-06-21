@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>X 用户监控台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260527-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260622-1" />
   </head>
   <body>
     <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
@@ -423,7 +423,7 @@
               <input id="barkEnabled" type="checkbox" />
               <span>
                 <strong>启用 Bark 通知</strong>
-                <small>关闭后保留设备码和提醒设置，但轮询事件不会推送到 Bark。</small>
+                <small>关闭后普通事件不会推送；命中 CA 时仍会强制紧急推送。</small>
               </span>
             </label>
             <div class="field-grid">
@@ -475,7 +475,7 @@
                 <input id="barkHotFilterMinCommon" type="number" min="2" max="20" value="2" />
               </label>
             </div>
-            <p class="hint">开启后，Bark 只推送达到共同关注阈值的项目升温事件。</p>
+            <p class="hint">开启后，Bark 只推送达到共同关注阈值的项目升温事件；命中 CA 时不受这个过滤影响。</p>
           </section>
 
           <section class="setting-section">
@@ -511,6 +511,6 @@
       <option value="silence"></option>
       <option value="telegraph"></option>
     </datalist>
-    <script src="/static/app.js?v=20260529-1"></script>
+    <script src="/static/app.js?v=20260622-1"></script>
   </body>
 </html>

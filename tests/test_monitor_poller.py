@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import pytest
 
 from twitter_cli.models import Author, Metrics, Tweet, UserProfile
+from twitter_monitor.contracts import enrich_payload_with_contracts
 from twitter_monitor.notifiers import BarkNotifier, EventFormatter, TelegramNotifier, WxPusherNotifier
 from twitter_monitor.notifiers import NotificationResult
 from twitter_monitor.poller import MonitorPoller
@@ -169,6 +170,37 @@ def test_following_event_payload_includes_hot_project_context(tmp_path) -> None:
     assert payload["hotProject"]["trendEvents"][1]["marker"] == "🔥"
 
 
+def test_following_event_payload_extracts_token_contract_from_bio(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    target = storage.add_target("alice", monitor_tweets=False)
+    storage.set_initialized(target["id"], following=True)
+    client = FakeClient()
+    client.following = [
+        UserProfile(
+            id="project-1",
+            name="c0mpute",
+            screen_name="c0mputeAI",
+            bio=(
+                "Uncensored, private, decentralized AI inference network. "
+                "CA: EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump"
+            ),
+        )
+    ]
+    poller = FakePoller(storage, _settings(storage.db_path), FakeNotifier(), client)
+
+    result = poller.poll_target(storage.get_target(target["id"]))  # type: ignore[arg-type]
+
+    assert result["newFollowing"] == 1
+    event = storage.list_events()[0]
+    payload = json.loads(event["payload_json"])
+    assert event["token_contracts"][0]["address"] == "EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump"
+    assert payload["tokenContracts"][0]["chain"] == "sol"
+    assert payload["tokenContracts"][0]["links"][0]["url"] == (
+        "https://gmgn.ai/sol/token/EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump"
+    )
+
+
 def test_backfill_following_supplements_shared_project_context(tmp_path) -> None:
     storage = MonitorStorage(str(tmp_path / "monitor.db"))
     storage.init()
@@ -289,6 +321,18 @@ def test_notification_adapter_skips_disabled_channels(tmp_path) -> None:
     assert poller._notification_adapter("bark").adapters == []
 
 
+def test_notification_adapter_force_bark_includes_disabled_bark(tmp_path) -> None:
+    storage = MonitorStorage(str(tmp_path / "monitor.db"))
+    storage.init()
+    storage.update_bark_settings(bark_device_keys=["device-key"], bark_enabled=False)
+    poller = MonitorPoller(storage, _settings(storage.db_path), FakeNotifier())
+
+    adapter = poller._notification_adapter("bark", force_bark=True)
+
+    assert len(adapter.adapters) == 1
+    assert isinstance(adapter.adapters[0], BarkNotifier)
+
+
 def test_following_notification_uses_target_handle_and_time(monkeypatch) -> None:
     monkeypatch.setenv("MONITOR_TIMEZONE", "Asia/Shanghai")
     monkeypatch.setattr(
@@ -349,6 +393,40 @@ def test_wxpusher_html_formatter_links_profiles_and_urls(monkeypatch) -> None:
     assert '<a href="https://x.com/nina_rong">Nina Rong（@nina_rong）</a>' in text
     assert '<a href="https://x.com/BNBChain">@BNBChain</a>' in text
     assert '<a href="https://x.com/nina_rong">https://x.com/nina_rong</a>' in text
+
+
+def test_telegram_html_formatter_includes_contract_and_chart(monkeypatch) -> None:
+    monkeypatch.setenv("MONITOR_TIMEZONE", "Asia/Shanghai")
+    monkeypatch.setattr(
+        "twitter_monitor.notifiers.LibreTranslateClient.translate_to_chinese",
+        lambda self, text: "",
+    )
+    payload = enrich_payload_with_contracts(
+        {"name": "c0mpute", "screenName": "c0mputeAI"},
+        "Uncensored AI network. CA: EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump",
+    )
+
+    text = EventFormatter().format_html(
+        {
+            "event_type": "following",
+            "target_handle": "Ga__ke",
+            "target_name": "gake",
+            "target_group_name": "币圈-alpha猎手",
+            "target_remark_name": "dnf",
+            "title": "c0mpute (@c0mputeAI)",
+            "body": "Uncensored AI network. CA: EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump",
+            "url": "https://x.com/c0mputeAI",
+            "detected_at": "2026-06-13T11:41:32Z",
+            "payload_json": json.dumps(payload),
+        }
+    )
+
+    assert text.startswith("<b>🚨 CA K线：</b>")
+    assert "<code>EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump</code>" in text
+    assert (
+        '<a href="https://gmgn.ai/sol/token/EmcxFTNVDqyLHp11NvwvLZ4D7LKGbG9i7B8RF7dwpump">'
+        "GMGN Solana K线</a>"
+    ) in text
 
 
 def test_wxpusher_notifier_sends_html_payload(monkeypatch) -> None:
@@ -527,6 +605,71 @@ def test_bark_notifier_sends_critical_payload(monkeypatch) -> None:
     assert payload["group"] == "XMonitor"
     assert payload["volume"] == "8"
     assert payload["url"] == "https://x.com/alice/status/1"
+
+
+def test_bark_notifier_forces_critical_alarm_for_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "twitter_monitor.notifiers.LibreTranslateClient.translate_to_chinese",
+        lambda self, text: "",
+    )
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"code":200,"message":"success"}'
+
+    class FakeOpener:
+        def __init__(self) -> None:
+            self.payload = None
+
+        def open(self, request, timeout):
+            self.payload = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+    payload = enrich_payload_with_contracts(
+        {},
+        "BSC CA: 0x1234567890abcdef1234567890abcdef12345678",
+    )
+    opener = FakeOpener()
+    notifier = BarkNotifier(
+        "https://api.day.app",
+        ["device-key"],
+        level="passive",
+        hot_filter_enabled=True,
+        hot_filter_min_common=99,
+    )
+    notifier._opener = lambda: opener  # type: ignore[method-assign]
+
+    result = notifier.send_event(
+        {
+            "event_type": "tweet",
+            "target_handle": "alice",
+            "target_name": "Alice",
+            "title": "CA",
+            "body": "BSC CA: 0x1234567890abcdef1234567890abcdef12345678",
+            "url": "https://x.com/alice/status/1",
+            "detected_at": "2026-05-22T14:57:15Z",
+            "payload_json": json.dumps(payload),
+        }
+    )
+
+    assert result.sent is True
+    assert opener.payload["level"] == "critical"
+    assert opener.payload["call"] == "1"
+    assert opener.payload["sound"] == "alarm"
+    assert opener.payload["volume"] == "5"
+    assert "🚨CA 原创发推" in opener.payload["title"]
+    assert "`0x1234567890abcdef1234567890abcdef12345678`" in opener.payload["markdown"]
+    assert "https://gmgn.ai/bsc/token/0x1234567890abcdef1234567890abcdef12345678" in (
+        opener.payload["markdown"]
+    )
 
 
 def test_bark_hot_filter_skips_below_threshold() -> None:

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from .contracts import event_has_token_contracts, event_token_contracts
 from .settings import MonitorSettings
 from .translator import LibreTranslateClient
 
@@ -76,6 +77,7 @@ class EventFormatter:
         payload = self._payload(event)
         translated = self._translate(str(event.get("body") or ""))
         time_text = html.escape(self._format_time_plain(str(event.get("detected_at") or "")))
+        contract_preview = self._token_contract_html_preview(event)
         if event_type == "tweet":
             lines = [
                 "<b>%s 于 %s 原创发推</b>" % (target, time_text),
@@ -115,6 +117,9 @@ class EventFormatter:
                 "发现时间：%s" % html.escape(self._format_time(str(event.get("detected_at") or ""))),
                 body,
             ]
+        if contract_preview:
+            lines = [contract_preview, "", *lines]
+        lines.extend(self._token_contract_html_lines(event))
         if translated:
             lines.extend(["", "翻译简介：", self._linkify_plain_text(translated)])
         if url:
@@ -158,6 +163,7 @@ class EventFormatter:
             if body:
                 sections.append(self._section("内容", body))
 
+        sections.extend(self._token_contract_html_sections(event))
         if translated:
             sections.append(self._section("翻译简介", self._linkify_plain_text(translated)))
         if url:
@@ -218,6 +224,7 @@ class EventFormatter:
                 sections.append(self._markdown_section("内容", body))
             translation_label = "翻译内容"
 
+        sections.extend(self._token_contract_markdown_sections(event))
         if translated:
             sections.append(
                 self._markdown_section(translation_label, self._linkify_markdown_text(translated))
@@ -240,7 +247,12 @@ class EventFormatter:
             "test": "测试通知",
         }
         hot_prefix = "🔥 热点项目 " if self._hot_project(self._payload(event)) else ""
-        return _clip("%s%s %s" % (hot_prefix, self._target_identity_plain(event), labels.get(event_type, "新事件")), 64)
+        contract_prefix = "🚨 CA " if event_has_token_contracts(event) else ""
+        return _clip(
+            "%s%s%s %s"
+            % (contract_prefix, hot_prefix, self._target_identity_plain(event), labels.get(event_type, "新事件")),
+            64,
+        )
 
     def bark_title(self, event: dict[str, Any]) -> str:
         event_type = str(event.get("event_type") or "")
@@ -252,7 +264,12 @@ class EventFormatter:
             "test": "测试通知",
         }
         hot_prefix = "🔥" if self._hot_project(self._payload(event)) else ""
-        return _clip("【%s%s】%s" % (hot_prefix, labels.get(event_type, "新事件"), self._target_identity_plain(event)), 96)
+        contract_prefix = "🚨CA " if event_has_token_contracts(event) else ""
+        return _clip(
+            "【%s%s%s】%s"
+            % (contract_prefix, hot_prefix, labels.get(event_type, "新事件"), self._target_identity_plain(event)),
+            96,
+        )
 
     def _payload(self, event: dict[str, Any]) -> dict[str, Any]:
         raw = event.get("payload_json") or "{}"
@@ -451,6 +468,86 @@ class EventFormatter:
             lines.append(html.escape(text) if html_mode else self._markdown_escape(text))
         separator = "<br>" if html_mode else "\n"
         return separator.join(lines)
+
+    def _token_contract_html_preview(self, event: dict[str, Any]) -> str:
+        links = self._first_token_contract_links(event)
+        if not links:
+            return ""
+        return "<b>🚨 CA K线：</b>%s" % " / ".join(
+            self._html_link(str(link.get("url") or ""), str(link.get("label") or "K线")) for link in links
+        )
+
+    def _token_contract_html_lines(self, event: dict[str, Any]) -> list[str]:
+        lines = []
+        for contract in event_token_contracts(event):
+            links = self._contract_html_links(contract)
+            address = html.escape(str(contract.get("address") or ""))
+            chain_label = html.escape(str(contract.get("chainLabel") or contract.get("chain") or ""))
+            lines.extend(["", "<b>🚨 合约地址</b>", "链：%s" % chain_label, "CA：<code>%s</code>" % address])
+            if links:
+                lines.append("K线：%s" % links)
+        return lines
+
+    def _token_contract_html_sections(self, event: dict[str, Any]) -> list[str]:
+        sections = []
+        for contract in event_token_contracts(event):
+            links = self._contract_html_links(contract)
+            address = html.escape(str(contract.get("address") or ""))
+            chain_label = html.escape(str(contract.get("chainLabel") or contract.get("chain") or ""))
+            content = "链：%s<br>CA：<code>%s</code>" % (chain_label, address)
+            if links:
+                content += "<br>K线：%s" % links
+            sections.append(self._section("🚨 合约地址", content))
+        return sections
+
+    def _token_contract_markdown_sections(self, event: dict[str, Any]) -> list[str]:
+        sections = []
+        for contract in event_token_contracts(event):
+            links = self._contract_markdown_links(contract)
+            address = self._markdown_escape(str(contract.get("address") or ""))
+            chain_label = self._markdown_escape(str(contract.get("chainLabel") or contract.get("chain") or ""))
+            lines = ["链：%s" % chain_label, "CA：`%s`" % address]
+            if links:
+                lines.append("K线：%s" % links)
+            sections.append(self._markdown_section("🚨 合约地址", "\n".join(lines)))
+        return sections
+
+    def _contract_html_links(self, contract: dict[str, Any]) -> str:
+        links = contract.get("links")
+        if not isinstance(links, list):
+            return ""
+        rendered = []
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            label = str(link.get("label") or "K线")
+            url = str(link.get("url") or "")
+            if url:
+                rendered.append(self._html_link(url, label))
+        return " / ".join(rendered)
+
+    def _contract_markdown_links(self, contract: dict[str, Any]) -> str:
+        links = contract.get("links")
+        if not isinstance(links, list):
+            return ""
+        rendered = []
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            label = str(link.get("label") or "K线")
+            url = str(link.get("url") or "")
+            if url:
+                rendered.append(self._markdown_link(url, label))
+        return " / ".join(rendered)
+
+    def _first_token_contract_links(self, event: dict[str, Any]) -> list[dict[str, Any]]:
+        contracts = event_token_contracts(event)
+        if not contracts:
+            return []
+        links = contracts[0].get("links")
+        if not isinstance(links, list):
+            return []
+        return [link for link in links[:3] if isinstance(link, dict) and link.get("url")]
 
     def _section(self, label: str, content: str) -> str:
         if not content:
@@ -783,9 +880,15 @@ class BarkNotifier:
     def send_event(self, event: dict[str, Any]) -> NotificationResult:
         if not self.configured:
             return NotificationResult(False, "bark_not_configured")
-        if self.hot_filter_enabled and _event_hot_common_count(event) < self.hot_filter_min_common:
+        has_contracts = event_has_token_contracts(event)
+        if (
+            self.hot_filter_enabled
+            and not has_contracts
+            and _event_hot_common_count(event) < self.hot_filter_min_common
+        ):
             return NotificationResult(False, None, skipped=True)
-        effective_level = "critical" if self.call else self.level
+        effective_call = self.call or has_contracts
+        effective_level = "critical" if effective_call else self.level
         payload = {
             "title": self.formatter.bark_title(event),
             "body": _clip(self.formatter.format_text(event), 600),
@@ -800,9 +903,9 @@ class BarkNotifier:
             payload["device_keys"] = self.device_keys
         if event.get("url"):
             payload["url"] = str(event.get("url") or "")
-        if self.sound:
-            payload["sound"] = self.sound
-        if self.call:
+        if self.sound or has_contracts:
+            payload["sound"] = self.sound or "alarm"
+        if effective_call:
             payload["call"] = "1"
         if effective_level == "critical":
             payload["volume"] = str(self.volume)

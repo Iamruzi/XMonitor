@@ -687,6 +687,62 @@ a {
   line-height: 1.48;
 }
 
+.contract-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.contract-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+}
+
+.contract-item strong {
+  display: block;
+  color: #9a3412;
+  font-size: 12px;
+}
+
+.contract-item code {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: #1f2937;
+  font-size: 12px;
+}
+
+.contract-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.contract-actions .mini-copy,
+.contract-link {
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.contract-link {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #f97316;
+  color: #9a3412;
+  text-decoration: none;
+}
+
 .pager {
   display: grid;
   grid-template-columns: 86px 1fr 86px;

@@ -209,6 +209,69 @@ function targetIdentity(target) {
   return parts.join("｜");
 }
 
+function eventContracts(event) {
+  if (Array.isArray(event.token_contracts)) return event.token_contracts;
+  try {
+    const payload = JSON.parse(event.payload_json || "{}");
+    return Array.isArray(payload.tokenContracts) ? payload.tokenContracts : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function contractSearchText(event) {
+  return eventContracts(event)
+    .map((contract) => {
+      const links = Array.isArray(contract.links)
+        ? contract.links.map((link) => `${link.label || ""} ${link.url || ""}`).join(" ")
+        : "";
+      return `${contract.address || ""} ${contract.chainLabel || ""} ${contract.chain || ""} ${links}`;
+    })
+    .join(" ");
+}
+
+function contractLinksHtml(contract) {
+  const links = Array.isArray(contract.links) ? contract.links : [];
+  return links
+    .filter((link) => link && link.url)
+    .map((link) => (
+      `<a class="contract-link" href="${escapeHtml(link.url)}" target="_blank" rel="noreferrer">` +
+      `${escapeHtml(link.label || "K线")}</a>`
+    ))
+    .join("");
+}
+
+function contractsHtml(event) {
+  const contracts = eventContracts(event);
+  if (!contracts.length) return "";
+  return `
+    <div class="contract-list">
+      ${contracts.map((contract) => `
+        <div class="contract-item">
+          <div>
+            <strong>CA · ${escapeHtml(contract.chainLabel || contract.chain || "链未知")}</strong>
+            <code>${escapeHtml(contract.address || "")}</code>
+          </div>
+          <div class="contract-actions">
+            <button type="button" class="ghost mini-copy" data-copy-ca="${escapeHtml(contract.address || "")}">复制</button>
+            ${contractLinksHtml(contract)}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+async function copyContractAddress(address) {
+  if (!address) return;
+  try {
+    await navigator.clipboard.writeText(address);
+    showToast("已复制 CA", address);
+  } catch (_error) {
+    showToast("复制失败", "浏览器未允许剪贴板访问");
+  }
+}
+
 function taskTypeText(value) {
   if (value === "following") return "关注";
   if (value === "tweets") return "推文";
@@ -487,7 +550,9 @@ function eventMatches(event) {
   if (notify === "pending" && event.notified_at) return false;
   if (notify === "error" && !event.notification_error) return false;
   if (!keyword) return true;
-  return `${event.title} ${event.body} ${targetIdentity(event)}`.toLowerCase().includes(keyword);
+  return `${event.title} ${event.body} ${targetIdentity(event)} ${contractSearchText(event)}`
+    .toLowerCase()
+    .includes(keyword);
 }
 
 function eventCard(event) {
@@ -506,9 +571,13 @@ function eventCard(event) {
     <div class="event-title">${escapeHtml(event.title)}</div>
     <div class="event-meta">${escapeHtml(source)} · ${escapeHtml(fmt(event.detected_at))}</div>
     <p class="event-body">${escapeHtml(clip(event.body, 280))}</p>
+    ${contractsHtml(event)}
     ${event.url ? `<p class="event-meta"><a href="${safeUrl}" target="_blank" rel="noreferrer">${safeUrl}</a></p>` : ""}
     ${event.notification_error ? `<div class="event-meta error">${escapeHtml(event.notification_error)}</div>` : ""}
   `;
+  card.querySelectorAll("[data-copy-ca]").forEach((button) => {
+    button.addEventListener("click", () => copyContractAddress(button.dataset.copyCa || ""));
+  });
   return card;
 }
 
